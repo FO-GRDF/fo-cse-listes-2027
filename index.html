@@ -1004,6 +1004,48 @@ function genererSlots(candF, candH, forcedFirst) {
 }
 
 /* ═══════════════════════════════════════════════════
+   R. 2314-20 : RÉPARTITION DES SIÈGES À LA PLUS FORTE MOYENNE
+   Distribue `sieges` sièges entre les listes selon leurs voix.
+   voix = { 'FO': 100, 'CFDT': 80, 'CGT': 45, ... }
+   Algorithme : à chaque siège, on attribue à la liste qui maximise voix/(sièges_déjà_attribués + 1).
+   ═══════════════════════════════════════════════════ */
+function plusForteMoyenne(voix, sieges) {
+  const orgs = Object.keys(voix).filter(o => voix[o] > 0);
+  const result = {};
+  Object.keys(voix).forEach(o => result[o] = 0);
+  if (orgs.length === 0 || sieges <= 0) return result;
+  for (let s = 0; s < sieges; s++) {
+    let bestOrg = null;
+    let bestRatio = -1;
+    orgs.forEach(o => {
+      const ratio = voix[o] / (result[o] + 1);
+      if (ratio > bestRatio) { bestRatio = ratio; bestOrg = o; }
+    });
+    if (bestOrg !== null) result[bestOrg]++;
+  }
+  return result;
+}
+
+// Recherche le nombre minimal de voix FO pour décrocher exactement N sièges,
+// les autres OS conservant leurs voix de référence.
+function voixFOPourNSieges(voixAutresOS, sieges, N) {
+  if (N < 0 || N > sieges) return null;
+  const sumAutres = Object.values(voixAutresOS).reduce((a, b) => a + b, 0);
+  let lo = 0;
+  let hi = Math.max(sumAutres * (sieges + 2), 1000);
+  // Si même avec 0 voix FO obtient déjà N, retourner 0
+  const rep0 = plusForteMoyenne({ ...voixAutresOS, FO: 0 }, sieges);
+  if ((rep0.FO || 0) >= N) return 0;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const rep = plusForteMoyenne({ ...voixAutresOS, FO: mid }, sieges);
+    if ((rep.FO || 0) >= N) hi = mid;
+    else lo = mid + 1;
+  }
+  return lo;
+}
+
+/* ═══════════════════════════════════════════════════
    ÉTAT GLOBAL DE L'APPLICATION
    ═══════════════════════════════════════════════════ */
 const state = {
@@ -1013,8 +1055,22 @@ const state = {
   selectedUM: null,
   candidats: {},      // { titulaires: { collège: [initiales par slot] }, suppleants: idem }
   premierSexe: { titulaires: {}, suppleants: {} },  // { type: { collège: 'F' | 'H' | null (auto) } }
-  partic2023: {}      // { collège: pourcentage observé aux élections de 2023 (0-100) }
+  // partic2023[collège] = { particPct: 65.4, voix: { FO, CFDT, CGT, CFECGC, Autres } }
+  partic2023: {}
 };
+
+// Migration / accès défensif : renvoie toujours un objet { particPct, voix }
+function getPartic2023(c) {
+  const v = state.partic2023[c];
+  if (v === undefined || v === null) return { particPct: null, voix: { FO:0, CFDT:0, CGT:0, CFECGC:0, Autres:0 } };
+  if (typeof v === 'number') return { particPct: v, voix: { FO:0, CFDT:0, CGT:0, CFECGC:0, Autres:0 } }; // ancien format
+  return {
+    particPct: v.particPct === undefined ? null : v.particPct,
+    voix: { FO:0, CFDT:0, CGT:0, CFECGC:0, Autres:0, ...(v.voix||{}) }
+  };
+}
+const LIBELLE_OS = { FO:'FO', CFDT:'CFDT', CGT:'CGT', CFECGC:'CFE-CGC', Autres:'Autres / NS' };
+const COULEUR_OS = { FO:'#019cda', CFDT:'#ff6b00', CGT:'#cc0000', CFECGC:'#0066cc', Autres:'#6b7280' };
 
 /* ═══════════════════════════════════════════════════
    NAVIGATION ONGLETS
@@ -1357,18 +1413,16 @@ function renderSimulateur() {
   const data = calculsUM(state.selectedUM);
   const conteneur = document.getElementById('simu-content');
   let html = `<h3>Établissement : ${state.selectedUM}</h3>
-    <p style="font-size:13px; color:var(--gris); margin-bottom:18px;">Les noms ci-dessous reprennent les candidats saisis dans le <strong>Constructeur</strong>. Les slots vides s'affichent comme "1<sup>er</sup> élu", "2<sup>e</sup> élu"… Saisissez vos candidats dans l'onglet précédent pour personnaliser ce tableau. <strong>Astuce :</strong> renseignez le taux de participation observé en 2023 par collège pour faire ressortir le scénario le plus probable.</p>`;
+    <p style="font-size:13px; color:var(--gris); margin-bottom:18px;">Les noms ci-dessous reprennent les candidats saisis dans le <strong>Constructeur</strong>. Les slots vides s'affichent comme "1<sup>er</sup> élu", "2<sup>e</sup> élu"… <strong>Astuce :</strong> renseignez les scores 2023 (participation + voix par organisation) pour faire ressortir le scénario le plus probable et projeter la répartition à la plus forte moyenne (R. 2314-20).</p>`;
   Object.keys(data.detail).forEach(c => {
     const det = data.detail[c];
     const sieges = data.sieges[c];
     const quorum = Math.ceil(det.effectif / 2);
     const comp = data.composition[c];
-    // Récupérer les noms saisis pour les TITULAIRES (le simulateur traite des élus titulaires)
     const premChoice = state.premierSexe.titulaires[c] || 'auto';
     const forcedFirst = (premChoice === 'F' || premChoice === 'H') ? premChoice : null;
     const slots = genererSlots(comp.candF, comp.candH, forcedFirst);
     const noms = (state.candidats.titulaires && state.candidats.titulaires[c]) || [];
-    // Étiquette de chaque position : nom saisi ou "Nème élu"
     const labelPos = (i) => {
       const nom = (noms[i] || '').trim();
       const sexe = slots[i] || '?';
@@ -1376,31 +1430,44 @@ function renderSimulateur() {
       if (nom) return `<span style="color:${sexe==='F'?'#be185d':'#1e40af'};font-weight:600;">${nom}</span> <span style="font-size:11px;opacity:0.6;">(${sexe})</span>`;
       return `<span style="opacity:0.6;font-style:italic;">${ordinal} élu (${sexe})</span>`;
     };
-    // Construire les en-têtes dynamiques selon le nombre de sièges (jusqu'à 5 pour lisibilité)
     const maxAffiche = Math.min(sieges, 5);
     let headers = `<th>Participation</th><th>Votants</th><th>Quotient</th>`;
     for (let n = 1; n <= maxAffiche; n++) {
       headers += `<th style="min-width:120px;">${n} élu${n>1?'s':''}<br><small style="font-weight:400;">${labelPos(n-1)}</small></th>`;
     }
     const collegeKeyS = c.replace(/[^a-zA-Z]/g, '_');
-    const partic2023 = state.partic2023[c];
-    const partic2023Val = (partic2023 !== undefined && partic2023 !== null) ? partic2023 : '';
+    const p2023 = getPartic2023(c);
+    const particVal = (p2023.particPct !== null && p2023.particPct !== undefined) ? p2023.particPct : '';
+    const sumVoix = Object.values(p2023.voix).reduce((a,b) => a + (parseFloat(b)||0), 0);
+    const hasAnyVoix = sumVoix > 0;
+    // Formulaire 2023 : participation + voix par OS
+    const champsOS = Object.keys(LIBELLE_OS).map(os => {
+      const v = p2023.voix[os] || '';
+      return `<div style="display:flex; flex-direction:column; gap:3px;">
+        <label for="voix-${os}-${collegeKeyS}" style="font-size:11px; font-weight:700; color:${COULEUR_OS[os]}; text-transform:uppercase;">${LIBELLE_OS[os]}</label>
+        <input type="number" id="voix-${os}-${collegeKeyS}" data-college="${c}" data-os="${os}" min="0" step="1" value="${v}" placeholder="0" class="inp-voix-os" style="width:90px; padding:5px 8px; border:1.5px solid var(--gris-clair); border-radius:5px; font-family:inherit; font-size:13px;">
+      </div>`;
+    }).join('');
     html += `<div style="margin-bottom:36px;">
       <h4 style="font-family:'Fraunces',serif; font-size:18px; color:var(--bleu); margin-bottom:8px;">Collège ${c}</h4>
       <p style="font-size:14px; color:var(--gris); margin-bottom:10px;">${det.effectif} inscrits · ${sieges} sièges · quorum 1<sup>er</sup> tour = <strong>${quorum} votants minimum</strong></p>
-      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:8px 0 14px; padding:10px 14px; background:#fffbeb; border:1.5px solid var(--or); border-radius:8px; font-size:13px;">
-        <label for="partic-${collegeKeyS}" style="font-weight:600; color:var(--bleu);">📊 Participation observée aux élections de 2023 :</label>
-        <input type="number" id="partic-${collegeKeyS}" data-college="${c}" min="0" max="100" step="0.1" value="${partic2023Val}" placeholder="ex : 65,4" style="width:100px; padding:6px 10px; border:1.5px solid var(--gris-clair); border-radius:6px; font-family:inherit; font-size:14px;">
-        <span>%</span>
-        <button type="button" data-college="${c}" class="btn-clear-partic" style="background:transparent; border:none; color:var(--gris); cursor:pointer; font-size:13px; text-decoration:underline; ${partic2023Val===''?'visibility:hidden':''}">effacer</button>
+      <div style="margin:8px 0 14px; padding:14px 16px; background:#fffbeb; border:1.5px solid var(--or); border-radius:8px;">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:13px; margin-bottom:12px;">
+          <label for="partic-${collegeKeyS}" style="font-weight:600; color:var(--bleu);">📊 Participation observée en 2023 :</label>
+          <input type="number" id="partic-${collegeKeyS}" data-college="${c}" min="0" max="100" step="0.1" value="${particVal}" placeholder="ex : 65,4" style="width:100px; padding:6px 10px; border:1.5px solid var(--gris-clair); border-radius:6px; font-family:inherit; font-size:14px;">
+          <span>%</span>
+          <button type="button" data-college="${c}" class="btn-clear-partic" style="background:transparent; border:none; color:var(--gris); cursor:pointer; font-size:13px; text-decoration:underline; margin-left:auto; ${(particVal===''&&!hasAnyVoix)?'visibility:hidden':''}">effacer tout</button>
+        </div>
+        <div style="font-size:12px; color:var(--gris); margin-bottom:8px; font-weight:600;">🗳️ Voix obtenues par organisation au 1<sup>er</sup> tour 2023 (laissez 0 si non présente) :</div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">${champsOS}</div>
       </div>
       <div class="table-wrap">
       <table>
         <thead><tr>${headers}</tr></thead>
         <tbody>`;
-    // Ligne "Participation 2023" en haut si saisie
-    if (partic2023 !== undefined && partic2023 !== null && partic2023 !== '' && !isNaN(parseFloat(partic2023))) {
-      const pct2023 = parseFloat(partic2023);
+    // Ligne 2023 si participation saisie
+    if (particVal !== '' && !isNaN(parseFloat(particVal))) {
+      const pct2023 = parseFloat(particVal);
       const votants2023 = Math.floor(det.effectif * pct2023 / 100);
       const quotient2023 = sieges > 0 ? votants2023 / sieges : 0;
       let row2023 = `<tr style="background:linear-gradient(90deg, #fef3c7 0%, #fffbeb 100%); border-left:4px solid var(--or); font-weight:600;">
@@ -1414,7 +1481,7 @@ function renderSimulateur() {
       row2023 += `</tr>`;
       html += row2023;
     }
-    // Lignes de scénarios génériques
+    // Scénarios génériques (modèle simple : quotient seul, sans concurrence)
     [50, 60, 70, 80, 90, 100].forEach(pct => {
       const votants = Math.floor(det.effectif * pct / 100);
       const quotient = sieges > 0 ? votants / sieges : 0;
@@ -1426,16 +1493,94 @@ function renderSimulateur() {
       row += `</tr>`;
       html += row;
     });
-    html += `</tbody></table></div></div>`;
+    html += `</tbody></table></div>`;
+
+    // ─── Projection 2023 multi-OS (plus forte moyenne) ───
+    if (hasAnyVoix) {
+      const rep2023 = plusForteMoyenne(p2023.voix, sieges);
+      const totalVoix = sumVoix;
+      // Détail tableau
+      let tabRep = `<table style="margin-top:6px;"><thead><tr>
+        <th>Organisation</th><th style="text-align:right;">Voix 2023</th><th style="text-align:right;">Part</th><th style="text-align:right;">Sièges</th>
+      </tr></thead><tbody>`;
+      Object.keys(LIBELLE_OS).forEach(os => {
+        const v = p2023.voix[os] || 0;
+        if (v === 0 && rep2023[os] === 0) return;
+        const pct = totalVoix > 0 ? (v/totalVoix*100).toFixed(1) : '0';
+        const sg = rep2023[os] || 0;
+        const isFO = (os === 'FO');
+        tabRep += `<tr style="${isFO?'background:#e8f4fd; font-weight:700;':''}">
+          <td><span style="display:inline-block; width:10px; height:10px; background:${COULEUR_OS[os]}; border-radius:2px; margin-right:6px; vertical-align:middle;"></span>${LIBELLE_OS[os]}</td>
+          <td style="text-align:right;">${v}</td>
+          <td style="text-align:right;">${pct} %</td>
+          <td style="text-align:right;"><strong style="color:${COULEUR_OS[os]}; font-size:16px;">${sg}</strong> / ${sieges}</td>
+        </tr>`;
+      });
+      tabRep += `</tbody></table>`;
+
+      // Voix-pivot : combien de voix FO pour décrocher N sièges, autres OS constants
+      const voixAutres = { ...p2023.voix };
+      delete voixAutres.FO;
+      let tabPivot = `<table style="margin-top:6px;"><thead><tr>
+        <th>Objectif FO</th><th style="text-align:right;">Voix FO nécessaires</th><th style="text-align:right;">Écart vs 2023</th><th>Faisabilité</th>
+      </tr></thead><tbody>`;
+      const voixFO2023 = p2023.voix.FO || 0;
+      for (let n = 1; n <= sieges; n++) {
+        const seuil = voixFOPourNSieges(voixAutres, sieges, n);
+        if (seuil === null) continue;
+        const ecart = seuil - voixFO2023;
+        const ecartTxt = ecart > 0 ? `+${ecart} voix` : (ecart < 0 ? `${ecart} voix` : 'identique');
+        const ecartColor = ecart > 0 ? 'var(--rouge)' : (ecart < 0 ? 'var(--vert)' : 'var(--gris)');
+        // Faisabilité : si seuil > votants possibles (≈ totalVoix), c'est inatteignable sans report
+        const inatteignable = seuil > totalVoix;
+        const faisa = inatteignable
+          ? `<span style="color:var(--rouge); font-weight:600;">🚫 dépasse SVE total 2023</span>`
+          : (ecart <= 0 ? `<span style="color:var(--vert); font-weight:600;">✅ déjà atteint en 2023</span>`
+                       : `<span style="color:var(--bleu);">🎯 mobilisation +${Math.round(ecart/voixFO2023*100) || '∞'} % vs 2023</span>`);
+        const labelPivot = noms[n-1]?.trim() ? `${n} sièges → ${noms[n-1]}` : `${n} siège${n>1?'s':''}`;
+        tabPivot += `<tr><td>${labelPivot}</td>
+          <td style="text-align:right;"><strong style="color:var(--bleu); font-size:16px;">${seuil}</strong></td>
+          <td style="text-align:right; color:${ecartColor}; font-weight:600;">${ecartTxt}</td>
+          <td>${faisa}</td></tr>`;
+      }
+      tabPivot += `</tbody></table>`;
+
+      html += `<div style="margin-top:14px; padding:14px 16px; background:#f0f9ff; border:1.5px solid #019cda; border-radius:8px;">
+        <div style="font-weight:700; color:var(--bleu); margin-bottom:6px; font-size:14px;">📈 Projection à la plus forte moyenne avec les scores 2023</div>
+        <div style="font-size:12px; color:var(--gris); margin-bottom:10px;">Répartition des ${sieges} sièges si chaque OS obtenait exactement les mêmes voix qu'en 2023 (R. 2314-20).</div>
+        <div class="table-wrap">${tabRep}</div>
+        <div style="font-weight:700; color:var(--bleu); margin:14px 0 6px; font-size:14px;">🎯 Voix FO nécessaires pour décrocher N sièges</div>
+        <div style="font-size:12px; color:var(--gris); margin-bottom:10px;">Si les autres organisations gardent leurs voix 2023, voici combien FO doit recueillir pour passer chaque palier.</div>
+        <div class="table-wrap">${tabPivot}</div>
+      </div>`;
+    }
+    html += `</div>`;
   });
-  html += `<div class="alert alert-info"><span class="alert-icon">📐</span><div><strong>Comment lire ce tableau :</strong> chaque colonne "<em>N élus</em>" montre le nombre de voix que la liste FO doit recueillir pour faire élire les N premiers candidats de la liste (ceux affichés sous l'en-tête). La ligne <span style="background:var(--or); padding:1px 6px; border-radius:3px; font-weight:700; color:var(--bleu);">2023</span> reprend la participation que vous avez saisie — c'est le scénario le plus parlant. Quotient électoral = nombre de votants ÷ nombre de sièges (R. 2314-19). Les sièges restants sont attribués à la plus forte moyenne (R. 2314-20).</div></div>`;
+  html += `<div class="alert alert-info"><span class="alert-icon">📐</span><div><strong>Comment lire les tableaux :</strong><br>• Le tableau du haut donne les voix nécessaires si FO était la seule liste — utile pour comparer aux paliers génériques (50/60/70/…).<br>• Si vous renseignez les voix 2023 par OS, le panneau bleu projette une <strong>vraie répartition à la plus forte moyenne</strong> (R. 2314-20) et calcule, pour chaque palier de sièges, le nombre de voix FO requis face à la concurrence réelle. La ligne <span style="background:var(--or); padding:1px 6px; border-radius:3px; font-weight:700; color:var(--bleu);">2023</span> reprend votre participation. Quotient électoral = votants ÷ sièges (R. 2314-19).</div></div>`;
   conteneur.innerHTML = html;
-  // Brancher les inputs de participation 2023 (change + Enter pour éviter perte de focus à chaque frappe)
+
+  // Brancher les inputs participation 2023
   conteneur.querySelectorAll('input[type=number][id^=partic-]').forEach(inp => {
     const apply = (e) => {
       const college = e.target.dataset.college;
       const v = e.target.value;
-      state.partic2023[college] = v === '' ? null : parseFloat(v);
+      const cur = getPartic2023(college);
+      cur.particPct = v === '' ? null : parseFloat(v);
+      state.partic2023[college] = cur;
+      renderSimulateur();
+    };
+    inp.addEventListener('change', apply);
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } });
+  });
+  // Brancher les inputs voix par OS
+  conteneur.querySelectorAll('input.inp-voix-os').forEach(inp => {
+    const apply = (e) => {
+      const college = e.target.dataset.college;
+      const os = e.target.dataset.os;
+      const v = e.target.value;
+      const cur = getPartic2023(college);
+      cur.voix[os] = v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0);
+      state.partic2023[college] = cur;
       renderSimulateur();
     };
     inp.addEventListener('change', apply);
@@ -1444,7 +1589,7 @@ function renderSimulateur() {
   conteneur.querySelectorAll('.btn-clear-partic').forEach(btn => {
     btn.addEventListener('click', (e) => {
       const college = e.target.dataset.college;
-      state.partic2023[college] = null;
+      state.partic2023[college] = { particPct: null, voix: { FO:0, CFDT:0, CGT:0, CFECGC:0, Autres:0 } };
       renderSimulateur();
     });
   });
