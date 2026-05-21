@@ -1050,20 +1050,25 @@ dropzone.addEventListener('drop', (e) => {
 });
 fileInput.addEventListener('change', (e) => { if (e.target.files.length) handleFile(e.target.files[0]); });
 
+// Normalise une chaîne : retire accents, met en majuscules, trim — pour comparaisons robustes
+// Indispensable car 'Exécution'.toUpperCase() == 'EXÉCUTION' et 'EXÉCUTION'.includes('EXEC') == false (É ≠ E)
+function normalizeStr(v) {
+  if (v === null || v === undefined) return '';
+  return String(v).trim().normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
+}
 function normaliserSexe(v) {
-  if (!v) return null;
-  const s = String(v).trim().toUpperCase();
+  const s = normalizeStr(v);
+  if (!s) return null;
   if (['M', 'H', 'MASCULIN', 'HOMME', 'MR', 'MONSIEUR'].includes(s)) return 'Masculin';
-  if (['F', 'FEMININ', 'FÉMININ', 'FEMME', 'MME', 'MADAME'].includes(s)) return 'Féminin';
+  if (['F', 'FEMININ', 'FEMME', 'MME', 'MADAME'].includes(s)) return 'Féminin';
   return null;
 }
 function normaliserCollege(v) {
-  if (!v) return null;
-  const s = String(v).trim();
-  const u = s.toUpperCase();
-  if (u.includes('EXEC') || u.includes('OUVRIER') || u === '1' || u === 'I' || u === '1ER') return 'Exécution';
-  if (u.includes('MAIT') || u.includes('MAÎT') || u.includes('TECH') || u === '2' || u === 'II' || u === '2EME' || u === '2ÈME') return 'Maîtrise';
-  if (u.includes('CADRE') || u.includes('ING') || u === '3' || u === 'III' || u === '3EME' || u === '3ÈME') return 'Cadre';
+  const u = normalizeStr(v);  // ex: 'Exécution' → 'EXECUTION'
+  if (!u) return null;
+  if (u.includes('EXEC') || u.includes('OUVRIER') || u.includes('EMPLOYE') || u === '1' || u === 'I' || u === '1ER') return 'Exécution';
+  if (u.includes('MAIT') || u.includes('TECH') || u === '2' || u === 'II' || u === '2EME') return 'Maîtrise';
+  if (u.includes('CADRE') || u.includes('ING') || u === '3' || u === 'III' || u === '3EME') return 'Cadre';
   return null;
 }
 
