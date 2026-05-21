@@ -1012,7 +1012,8 @@ const state = {
   ums: [],            // liste UM disponibles
   selectedUM: null,
   candidats: {},      // { titulaires: { collège: [initiales par slot] }, suppleants: idem }
-  premierSexe: { titulaires: {}, suppleants: {} }  // { type: { collège: 'F' | 'H' | null (auto) } }
+  premierSexe: { titulaires: {}, suppleants: {} },  // { type: { collège: 'F' | 'H' | null (auto) } }
+  partic2023: {}      // { collège: pourcentage observé aux élections de 2023 (0-100) }
 };
 
 /* ═══════════════════════════════════════════════════
@@ -1356,7 +1357,7 @@ function renderSimulateur() {
   const data = calculsUM(state.selectedUM);
   const conteneur = document.getElementById('simu-content');
   let html = `<h3>Établissement : ${state.selectedUM}</h3>
-    <p style="font-size:13px; color:var(--gris); margin-bottom:18px;">Les noms ci-dessous reprennent les candidats saisis dans le <strong>Constructeur</strong>. Les slots vides s'affichent comme "1<sup>er</sup> élu", "2<sup>e</sup> élu"… Saisissez vos candidats dans l'onglet précédent pour personnaliser ce tableau.</p>`;
+    <p style="font-size:13px; color:var(--gris); margin-bottom:18px;">Les noms ci-dessous reprennent les candidats saisis dans le <strong>Constructeur</strong>. Les slots vides s'affichent comme "1<sup>er</sup> élu", "2<sup>e</sup> élu"… Saisissez vos candidats dans l'onglet précédent pour personnaliser ce tableau. <strong>Astuce :</strong> renseignez le taux de participation observé en 2023 par collège pour faire ressortir le scénario le plus probable.</p>`;
   Object.keys(data.detail).forEach(c => {
     const det = data.detail[c];
     const sieges = data.sieges[c];
@@ -1381,13 +1382,39 @@ function renderSimulateur() {
     for (let n = 1; n <= maxAffiche; n++) {
       headers += `<th style="min-width:120px;">${n} élu${n>1?'s':''}<br><small style="font-weight:400;">${labelPos(n-1)}</small></th>`;
     }
+    const collegeKeyS = c.replace(/[^a-zA-Z]/g, '_');
+    const partic2023 = state.partic2023[c];
+    const partic2023Val = (partic2023 !== undefined && partic2023 !== null) ? partic2023 : '';
     html += `<div style="margin-bottom:36px;">
       <h4 style="font-family:'Fraunces',serif; font-size:18px; color:var(--bleu); margin-bottom:8px;">Collège ${c}</h4>
-      <p style="font-size:14px; color:var(--gris); margin-bottom:14px;">${det.effectif} inscrits · ${sieges} sièges · quorum 1<sup>er</sup> tour = <strong>${quorum} votants minimum</strong></p>
+      <p style="font-size:14px; color:var(--gris); margin-bottom:10px;">${det.effectif} inscrits · ${sieges} sièges · quorum 1<sup>er</sup> tour = <strong>${quorum} votants minimum</strong></p>
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:8px 0 14px; padding:10px 14px; background:#fffbeb; border:1.5px solid var(--or); border-radius:8px; font-size:13px;">
+        <label for="partic-${collegeKeyS}" style="font-weight:600; color:var(--bleu);">📊 Participation observée aux élections de 2023 :</label>
+        <input type="number" id="partic-${collegeKeyS}" data-college="${c}" min="0" max="100" step="0.1" value="${partic2023Val}" placeholder="ex : 65,4" style="width:100px; padding:6px 10px; border:1.5px solid var(--gris-clair); border-radius:6px; font-family:inherit; font-size:14px;">
+        <span>%</span>
+        <button type="button" data-college="${c}" class="btn-clear-partic" style="background:transparent; border:none; color:var(--gris); cursor:pointer; font-size:13px; text-decoration:underline; ${partic2023Val===''?'visibility:hidden':''}">effacer</button>
+      </div>
       <div class="table-wrap">
       <table>
         <thead><tr>${headers}</tr></thead>
         <tbody>`;
+    // Ligne "Participation 2023" en haut si saisie
+    if (partic2023 !== undefined && partic2023 !== null && partic2023 !== '' && !isNaN(parseFloat(partic2023))) {
+      const pct2023 = parseFloat(partic2023);
+      const votants2023 = Math.floor(det.effectif * pct2023 / 100);
+      const quotient2023 = sieges > 0 ? votants2023 / sieges : 0;
+      let row2023 = `<tr style="background:linear-gradient(90deg, #fef3c7 0%, #fffbeb 100%); border-left:4px solid var(--or); font-weight:600;">
+        <td><span style="background:var(--or); color:var(--bleu); padding:3px 8px; border-radius:4px; font-size:11px; font-weight:700; text-transform:uppercase;">2023</span> ${pct2023.toString().replace('.',',')} %</td>
+        <td>${votants2023}</td>
+        <td>${quotient2023.toFixed(1)}</td>`;
+      for (let n = 1; n <= maxAffiche; n++) {
+        const voix = Math.ceil(quotient2023 * n);
+        row2023 += `<td style="text-align:center;"><strong style="color:var(--bleu); font-size:18px;">${voix}</strong><br><span style="font-size:11px; color:var(--bleu); font-weight:600;">voix FO</span></td>`;
+      }
+      row2023 += `</tr>`;
+      html += row2023;
+    }
+    // Lignes de scénarios génériques
     [50, 60, 70, 80, 90, 100].forEach(pct => {
       const votants = Math.floor(det.effectif * pct / 100);
       const quotient = sieges > 0 ? votants / sieges : 0;
@@ -1401,8 +1428,26 @@ function renderSimulateur() {
     });
     html += `</tbody></table></div></div>`;
   });
-  html += `<div class="alert alert-info"><span class="alert-icon">📐</span><div><strong>Comment lire ce tableau :</strong> chaque colonne "<em>N élus</em>" montre le nombre de voix que la liste FO doit recueillir pour faire élire les N premiers candidats de la liste (ceux affichés sous l'en-tête). Quotient électoral = nombre de votants ÷ nombre de sièges (R. 2314-19). Les sièges restants sont attribués à la plus forte moyenne (R. 2314-20).</div></div>`;
+  html += `<div class="alert alert-info"><span class="alert-icon">📐</span><div><strong>Comment lire ce tableau :</strong> chaque colonne "<em>N élus</em>" montre le nombre de voix que la liste FO doit recueillir pour faire élire les N premiers candidats de la liste (ceux affichés sous l'en-tête). La ligne <span style="background:var(--or); padding:1px 6px; border-radius:3px; font-weight:700; color:var(--bleu);">2023</span> reprend la participation que vous avez saisie — c'est le scénario le plus parlant. Quotient électoral = nombre de votants ÷ nombre de sièges (R. 2314-19). Les sièges restants sont attribués à la plus forte moyenne (R. 2314-20).</div></div>`;
   conteneur.innerHTML = html;
+  // Brancher les inputs de participation 2023 (change + Enter pour éviter perte de focus à chaque frappe)
+  conteneur.querySelectorAll('input[type=number][id^=partic-]').forEach(inp => {
+    const apply = (e) => {
+      const college = e.target.dataset.college;
+      const v = e.target.value;
+      state.partic2023[college] = v === '' ? null : parseFloat(v);
+      renderSimulateur();
+    };
+    inp.addEventListener('change', apply);
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } });
+  });
+  conteneur.querySelectorAll('.btn-clear-partic').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const college = e.target.dataset.college;
+      state.partic2023[college] = null;
+      renderSimulateur();
+    });
+  });
 }
 
 /* ═══════════════════════════════════════════════════
