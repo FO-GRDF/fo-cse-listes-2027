@@ -1080,43 +1080,82 @@ function mapOSCerfa(label) {
 }
 
 async function extractLinesFromPDF(file) {
-  // Charge le PDF, extrait pour chaque page les "items" texte avec leur position.
-  // Regroupe par Y arrondi pour reconstituer des lignes, trie par X dans chaque ligne.
+  // Extraction robuste : pour chaque page, on récupère les items texte avec leur position (x,y,w).
+  // Groupage par Y avec tolérance ±5 px (différences de baseline entre fontes du CERFA).
+  // Entre items consécutifs sur la même ligne, on ajoute un espace si le gap horizontal > 1 px
+  // (évite les chiffres collés "55515" et garde "5 5 5 1 5").
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
   const pagesText = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const tc = await page.getTextContent();
-    const byY = {};
-    tc.items.forEach(it => {
-      const y = Math.round(it.transform[5]);
-      (byY[y] = byY[y] || []).push({ x: it.transform[4], s: it.str });
+    const items = tc.items
+      .filter(it => it.str)
+      .map(it => ({ y: it.transform[5], x: it.transform[4], w: it.width || 0, s: it.str }))
+      .sort((a, b) => b.y - a.y || a.x - b.x); // haut→bas, puis gauche→droite
+    const lines = [];
+    let cur = [], curY = null;
+    const TOL = 5;
+    const flush = () => {
+      if (!cur.length) return;
+      cur.sort((a, b) => a.x - b.x);
+      let s = '';
+      let prevEnd = -Infinity;
+      cur.forEach(it => {
+        if (s && (it.x - prevEnd > 1 || /\s$/.test(s) === false && /^\S/.test(it.s))) s += ' ';
+        s += it.s;
+        prevEnd = it.x + (it.w || it.s.length * 4);
+      });
+      s = s.replace(/\s+/g, ' ').trim();
+      if (s) lines.push(s);
+    };
+    items.forEach(it => {
+      if (curY === null || Math.abs(it.y - curY) > TOL) {
+        flush();
+        cur = [it]; curY = it.y;
+      } else {
+        cur.push(it);
+      }
     });
-    const lines = Object.keys(byY).map(y => parseInt(y)).sort((a,b) => b - a) // pdf.js : y croissant = bas
-      .map(y => byY[y].sort((a,b) => a.x - b.x).map(o => o.s).join(' ').replace(/\s+/g,' ').trim())
-      .filter(l => l.length);
+    flush();
     pagesText.push({ page: i, lines });
   }
   return pagesText;
 }
 
-// Détecte le footer "Document NNN - Exemplaire XXX" pour regrouper les pages d'un même CERFA.
+// Regroupe les pages en blocs CERFA. Stratégie : 1 nouveau bloc démarre chaque fois qu'on
+// rencontre "Page 1" dans le footer (= 1re page d'un nouveau CERFA), OU à défaut on traite
+// chaque page comme son propre bloc. Fonctionne aussi bien pour 1 PDF = 1 CERFA que pour
+// 1 PDF avec plusieurs CERFA concaténés.
 function groupCerfaPages(pagesText) {
-  const groups = {};
-  pagesText.forEach(({ lines }) => {
+  const groups = [];
+  let current = null, currentKey = null;
+  pagesText.forEach(({ lines, page }) => {
     const full = lines.join('\n');
-    const m = full.match(/Document\s+(\d+)\s*[-–]\s*Exemplaire\s+(\w+)/i);
+    // Détecter "Document NNN - Exemplaire X - Page Y"
+    const m = full.match(/Document\s+(\d+)\s*[-–—]\s*Exemplaire\s+(\w+)\s*[-–—]\s*Page\s+(\d+)/i);
     if (m) {
       const key = `${m[1]}_${m[2]}`;
-      (groups[key] = groups[key] || []).push(full);
+      const pageNum = parseInt(m[3], 10);
+      if (pageNum === 1 || key !== currentKey) {
+        if (current) groups.push(current);
+        current = [];
+        currentKey = key;
+      }
+      current.push(full);
     } else {
-      // Pas de footer Document : on suppose 1 PDF = 1 CERFA, on agrège sous une clé unique
-      const key = `single_${Object.keys(groups).length}`;
-      (groups[key] = groups[key] || []).push(full);
+      // Pas de footer reconnu : traiter cette page comme son propre bloc isolé
+      if (current) groups.push(current);
+      current = [full];
+      currentKey = `page_${page}`;
+      groups.push(current);
+      current = null;
+      currentKey = null;
     }
   });
-  return groups;
+  if (current) groups.push(current);
+  return groups.map((arr, i) => ({ key: `bloc_${i}`, pages: arr }));
 }
 
 // Table R. 2314-1 partielle pour estimer nb de sièges à partir de l'effectif
@@ -1173,6 +1212,30 @@ function parseCerfaBlock(text) {
     const lab = lastOS.replace(/CFE\s*[-\s]*CGC/i, 'CFE-CGC').replace(/[\/,]+/g, ' ').replace(/\s+/g, ' ').toUpperCase().trim();
     const vRound = Math.round(v);
     if (!voixBrutes[lab] || vRound > voixBrutes[lab]) voixBrutes[lab] = vRound;
+  }
+  // FALLBACK : si rien trouvé en ligne-par-ligne (cas où le PDF colle des items),
+  // chercher dans le texte plat aplati. On dédoublonne par proximité+V identique.
+  if (Object.keys(voixBrutes).length === 0) {
+    const flat = text.replace(/\s+/g, ' ');
+    const reFlat = /\b(CFE[-\s]*CGC[\/,\s]+UNSA|CFE[-\s]*CGC|UNSA|CFDT|CGT|FO|FSU|SUD|Solidaires|UNAPL)\b/gi;
+    const found = [];
+    let mf;
+    while ((mf = reFlat.exec(flat)) !== null) {
+      const after = flat.substring(mf.index + mf[0].length, mf.index + mf[0].length + 100);
+      const nn = after.match(/-?\d+(?:[,.]\d+)?/g);
+      if (!nn || nn.length < 5) continue;
+      const v = parseFloat(nn[4].replace(',', '.'));
+      if (isNaN(v) || v <= 0) continue;
+      const lab = mf[1].replace(/CFE\s*[-\s]*CGC/i, 'CFE-CGC').replace(/[\/,]+/g, ' ').replace(/\s+/g, ' ').toUpperCase().trim();
+      found.push({ pos: mf.index, lab, v: Math.round(v) });
+    }
+    // Pour chaque entrée, si une autre entrée à proximité (<100 chars) a même V et label plus long, on l'ignore
+    const kept = found.filter(a => !found.some(b =>
+      b !== a && b.v === a.v && Math.abs(b.pos - a.pos) < 100 && b.lab.length > a.lab.length
+    ));
+    kept.forEach(({ lab, v }) => {
+      if (!voixBrutes[lab] || v > voixBrutes[lab]) voixBrutes[lab] = v;
+    });
   }
 
   // Clés d'entente (section V) : "Alliance ... <OS1> <OS1> XX.YY%" et "Alliance ... <OS2> <OS2> XX.YY%"
@@ -1240,23 +1303,31 @@ function parseCerfaBlock(text) {
   return { college, type, inscrits: A, votants: B, blancs: C, sve: D, sieges: P, participation, voix: voixFinal, voixBrutes, ententes };
 }
 
-// Parse un ou plusieurs PDF et retourne un tableau de CERFA dédupliqués par (collège, type), Titulaires prioritaires.
+// Parse un ou plusieurs PDF. Retourne tous les CERFA détectés (et les blocs non identifiés
+// pour diagnostic), dédupliqués par (collège, type) en gardant le 1er.
 async function parseCerfaFiles(files) {
   const results = [];
+  const diagBlocks = []; // pour debug : blocs qui n'ont pas matché
   for (const f of files) {
     try {
       const pages = await extractLinesFromPDF(f);
       const groups = groupCerfaPages(pages);
-      Object.values(groups).forEach(blockArr => {
+      groups.forEach(({ pages: blockArr }) => {
         const text = blockArr.join('\n');
         const parsed = parseCerfaBlock(text);
-        if (parsed) results.push({ ...parsed, fichier: f.name });
+        if (parsed) {
+          results.push({ ...parsed, fichier: f.name });
+        } else {
+          // Bloc détecté mais collège/type non identifié — capture le footer s'il existe
+          const m = text.match(/Document\s+(\d+)\s*[-–—]\s*Exemplaire\s+(\w+)/i);
+          diagBlocks.push({ fichier: f.name, footer: m ? `Document ${m[1]} ${m[2]}` : 'aucun footer', extrait: text.substring(0, 200) });
+        }
       });
     } catch (e) {
       results.push({ erreur: `${f.name} : ${e.message}` });
     }
   }
-  // Déduplication : pour chaque (collège, type) garder le 1er occurence
+  // Déduplication par (collège, type) — 1er gardé
   const seen = new Set();
   const uniq = [];
   for (const r of results) {
@@ -1265,6 +1336,7 @@ async function parseCerfaFiles(files) {
     if (seen.has(k)) continue;
     seen.add(k); uniq.push(r);
   }
+  uniq._diag = diagBlocks; // attache le diagnostic pour affichage
   return uniq;
 }
 
@@ -1864,45 +1936,67 @@ cerfaInput.addEventListener('change', async (e) => {
 });
 
 function afficherPreviewCerfa(results) {
-  // On garde uniquement les CERFA Titulaires pour pré-remplir le simulateur (les Suppléants sont informatifs)
   const tit = results.filter(r => !r.erreur && r.type === 'titulaires');
   const sup = results.filter(r => !r.erreur && r.type === 'suppleants');
   const err = results.filter(r => r.erreur);
+  const diag = results._diag || [];
+  const colleges = ['Exécution', 'Maîtrise', 'Cadre'];
+  const titByColl = Object.fromEntries(tit.map(r => [r.college, r]));
+  const supByColl = Object.fromEntries(sup.map(r => [r.college, r]));
 
   let html = `<div style="font-weight:700; color:var(--bleu); margin-bottom:8px; font-size:16px;">🔍 Aperçu de l'extraction</div>
-    <div style="font-size:12px; color:var(--gris); margin-bottom:10px;">Vérifiez les chiffres avant d'appliquer. Les Suppléants sont détectés mais seuls les Titulaires alimentent le simulateur.</div>`;
+    <div style="font-size:12px; color:var(--gris); margin-bottom:10px;">Vérifiez les chiffres avant d'appliquer. Les 3 collèges sont listés ci-dessous (TITULAIRES — c'est cette colonne qui alimente le simulateur).</div>`;
 
-  if (tit.length) {
-    html += `<table style="width:100%; font-size:13px;"><thead><tr>
-      <th>Collège</th><th>Inscrits</th><th>Votants</th><th>Partic.</th>
-      <th>FO</th><th>CFDT</th><th>CGT</th><th>CFE-CGC</th><th>Autres</th><th>Source</th>
-    </tr></thead><tbody>`;
-    tit.forEach(r => {
+  // Tableau Titulaires explicite avec les 3 collèges (même non détectés)
+  html += `<table style="width:100%; font-size:13px; margin-bottom:8px;"><thead><tr style="background:#019cda;color:#fff;">
+    <th style="text-align:left; padding:6px 8px;">Collège</th>
+    <th>Statut</th><th>Inscrits</th><th>Votants</th><th>Partic.</th>
+    <th>FO</th><th>CFDT</th><th>CGT</th><th>CFE-CGC</th><th>Autres</th>
+  </tr></thead><tbody>`;
+  colleges.forEach(c => {
+    const r = titByColl[c];
+    if (r) {
       const part = r.participation != null ? `${r.participation.toString().replace('.', ',')} %` : '—';
       html += `<tr>
-        <td><strong>${r.college}</strong></td>
+        <td><strong>${c}</strong></td>
+        <td><span style="color:var(--vert); font-weight:700;">✓ détecté</span></td>
         <td>${r.inscrits ?? '?'}</td>
         <td>${r.votants ?? '?'}</td>
         <td>${part}</td>
         <td><strong style="color:var(--bleu);">${r.voix.FO}</strong></td>
         <td>${r.voix.CFDT}</td>
         <td>${r.voix.CGT}</td>
-        <td>${r.college === 'Exécution' ? '—' : r.voix.CFECGC}</td>
+        <td>${c === 'Exécution' ? '—' : r.voix.CFECGC}</td>
         <td>${r.voix.Autres}</td>
-        <td style="font-size:11px; color:var(--gris);">${r.fichier || ''}</td>
       </tr>`;
-    });
-    html += `</tbody></table>`;
-  }
-  if (sup.length) {
-    html += `<details style="margin-top:8px;"><summary style="cursor:pointer; font-size:12px; color:var(--gris);">${sup.length} CERFA Suppléants détectés (info uniquement)</summary>
-      <ul style="font-size:12px; margin:6px 0;">${sup.map(r => `<li>${r.college} : FO=${r.voix.FO}, CFDT=${r.voix.CFDT}, CGT=${r.voix.CGT}, CFE-CGC=${r.voix.CFECGC}, Autres=${r.voix.Autres}</li>`).join('')}</ul>
+    } else {
+      html += `<tr style="background:#fef2f2;">
+        <td><strong>${c}</strong></td>
+        <td colspan="8" style="color:var(--rouge); font-weight:600;">⚠️ Aucun CERFA Titulaires détecté pour ce collège</td>
+      </tr>`;
+    }
+  });
+  html += `</tbody></table>`;
+
+  // Suppléants : compact
+  const supExist = colleges.filter(c => supByColl[c]);
+  if (supExist.length) {
+    html += `<details style="margin:6px 0;"><summary style="cursor:pointer; font-size:12px; color:var(--gris);">${supExist.length} CERFA Suppléants aussi détecté${supExist.length>1?'s':''} (info, non appliqué au simulateur)</summary>
+      <ul style="font-size:12px; margin:6px 0;">${supExist.map(c => { const r=supByColl[c]; return `<li>${c} : FO=${r.voix.FO}, CFDT=${r.voix.CFDT}, CGT=${r.voix.CGT}${c==='Exécution'?'':', CFE-CGC='+r.voix.CFECGC}${r.voix.Autres?', Autres='+r.voix.Autres:''}</li>`; }).join('')}</ul>
     </details>`;
   }
+
+  // Erreurs et blocs non identifiés
   if (err.length) {
     html += `<div style="margin-top:8px; color:var(--rouge); font-size:12px;">${err.map(r => '⚠️ ' + r.erreur).join('<br>')}</div>`;
   }
-  // Détection d'ententes pour afficher la clé
+  if (diag.length) {
+    html += `<details style="margin-top:8px;"><summary style="cursor:pointer; font-size:12px; color:var(--or);">🔧 Diagnostic : ${diag.length} bloc${diag.length>1?'s':''} sans collège identifiable (cliquer pour voir un extrait)</summary>
+      <ul style="font-size:11px; font-family:monospace; margin:6px 0; background:#fff; padding:6px; border:1px solid var(--gris-clair); max-height:200px; overflow:auto;">
+      ${diag.map(d => `<li><strong>${d.fichier}</strong> (${d.footer})<br><code style="color:var(--gris); white-space:pre-wrap;">${d.extrait.replace(/[<>]/g, c=>c==='<'?'&lt;':'&gt;')}</code></li>`).join('')}
+      </ul></details>`;
+  }
+  // Clés d'entente
   const avecEntente = tit.filter(r => r.ententes && Object.keys(r.ententes).length > 0);
   if (avecEntente.length) {
     html += `<div style="margin-top:8px; padding:8px 12px; background:#fff; border-left:3px solid var(--or); font-size:12px;">
@@ -1910,7 +2004,7 @@ function afficherPreviewCerfa(results) {
     </div>`;
   }
   html += `<div style="margin-top:12px; display:flex; gap:10px;">
-    <button type="button" id="btn-apply-cerfa" class="btn" style="background:var(--bleu); color:#fff; padding:10px 18px; border:none; border-radius:6px; font-weight:600; cursor:pointer;">✅ Appliquer ces valeurs au simulateur</button>
+    <button type="button" id="btn-apply-cerfa" class="btn" ${tit.length===0?'disabled style="opacity:0.4; cursor:not-allowed;"':''} style="background:var(--bleu); color:#fff; padding:10px 18px; border:none; border-radius:6px; font-weight:600; cursor:pointer;">✅ Appliquer (${tit.length} collège${tit.length>1?'s':''})</button>
     <button type="button" id="btn-cancel-cerfa" class="btn" style="background:#fff; color:var(--gris); padding:10px 18px; border:1.5px solid var(--gris-clair); border-radius:6px; font-weight:600; cursor:pointer;">Annuler</button>
   </div>`;
 
