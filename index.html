@@ -1,0 +1,1497 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Constructeur de liste CSE 2027 — FO GRDF</title>
+<meta name="description" content="Outil militants FO d'aide à la construction des listes électorales CSE 2027. Conforme aux articles L. 2314-30, R. 2314-1, R. 2314-19 du Code du travail.">
+<meta name="theme-color" content="#019cda">
+
+<!-- Analytics FO GRDF -->
+<script data-goatcounter="https://fo-grdf.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+
+<!-- Polices FO -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,400;0,700;0,900&family=DM+Sans:wght@300;400;500;600;700&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+
+<!-- Libs (traitement 100% navigateur, aucune donnée envoyée) -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.1/jspdf.plugin.autotable.min.js"></script>
+
+<style>
+/* ═══════════════════════════════════════════════════
+   PALETTE FO GRDF (ne JAMAIS modifier)
+   ═══════════════════════════════════════════════════ */
+:root {
+  --bleu: #019cda;
+  --bleu-fonce: #028bc2;
+  --or: #f7dd5c;
+  --or-clair: #fde8ea;
+  --vert: #28b193;
+  --vert-clair: #e8f8f4;
+  --rouge: #ef333e;
+  --rouge-fo: #c0303a;
+  --rouge-fonce: #7a0e1c;
+  --rouge-clair: #fde8ea;
+  --orange: #f59e0b;
+  --orange-clair: #fef3c7;
+  --fond: #F7F5F0;
+  --blanc: #FFFFFF;
+  --gris: #6B6B6B;
+  --gris-clair: #e5e7eb;
+  --texte: #1A1A2E;
+
+  /* Palette a11y (mode lecture universelle) */
+  --a11y-fond: #FFFFFF;
+  --a11y-texte: #000000;
+  --a11y-accent: #0033CC;
+  --a11y-erreur: #CC0000;
+  --a11y-ok: #006633;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--fond);
+  color: var(--texte);
+  min-height: 100vh;
+  line-height: 1.5;
+}
+
+.skip-link {
+  position: absolute; left: -9999px; top: 0;
+  background: var(--bleu); color: white; padding: 12px 20px;
+  z-index: 1000; text-decoration: none; font-weight: 600;
+}
+.skip-link:focus { left: 0; }
+
+.page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 24px 80px;
+}
+
+/* ═══ HEADER ═══ */
+.header {
+  background: linear-gradient(135deg, var(--bleu) 0%, var(--bleu-fonce) 100%);
+  border-radius: 20px;
+  padding: 40px 48px 36px;
+  margin-bottom: 32px;
+  color: white;
+  position: relative;
+  overflow: hidden;
+}
+.header::after {
+  content: '';
+  position: absolute;
+  right: -50px; top: -50px;
+  width: 200px; height: 200px;
+  background: radial-gradient(circle, rgba(247,221,92,0.15) 0%, transparent 70%);
+}
+.badge {
+  display: inline-block;
+  background: var(--or);
+  color: var(--bleu);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  padding: 6px 14px;
+  border-radius: 40px;
+  margin-bottom: 16px;
+}
+.header h1 {
+  font-family: 'Fraunces', serif;
+  font-size: clamp(28px, 4vw, 42px);
+  font-weight: 900;
+  line-height: 1.1;
+  margin-bottom: 14px;
+}
+.header h1 em { color: var(--or); font-style: italic; }
+.header .subtitle {
+  font-size: 18px;
+  opacity: 0.95;
+  max-width: 720px;
+}
+.rgpd-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+  background: rgba(40, 177, 147, 0.25);
+  border: 1.5px solid rgba(40, 177, 147, 0.8);
+  padding: 8px 14px;
+  border-radius: 30px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* ═══ ONGLETS ═══ */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  background: var(--blanc);
+  padding: 6px;
+  border-radius: 14px;
+  margin-bottom: 24px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+.tab-btn {
+  flex: 1;
+  min-width: 140px;
+  background: transparent;
+  border: none;
+  padding: 14px 18px;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--gris);
+  cursor: pointer;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s;
+}
+.tab-btn:hover { background: var(--fond); color: var(--texte); }
+.tab-btn.active {
+  background: var(--bleu);
+  color: white;
+}
+.tab-btn .step-num {
+  display: inline-flex;
+  width: 24px; height: 24px;
+  background: rgba(255,255,255,0.25);
+  border-radius: 50%;
+  align-items: center; justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+}
+.tab-btn:not(.active) .step-num {
+  background: var(--gris-clair);
+  color: var(--gris);
+}
+
+.tab-content { display: none; }
+.tab-content.active { display: block; animation: fadeIn 0.3s; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* ═══ CARTES ═══ */
+.card {
+  background: var(--blanc);
+  border-radius: 16px;
+  padding: 32px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+.card h2 {
+  font-family: 'Fraunces', serif;
+  font-size: 26px;
+  font-weight: 900;
+  color: var(--bleu);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.card h3 {
+  font-family: 'Fraunces', serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--texte);
+  margin: 20px 0 12px;
+}
+.card p { margin-bottom: 12px; }
+.card ul, .card ol { margin: 12px 0 12px 24px; }
+.card li { margin-bottom: 6px; }
+
+/* ═══ ALERTS ═══ */
+.alert {
+  padding: 16px 20px;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  border-left: 4px solid;
+}
+.alert-info { background: #e0f2fe; border-color: var(--bleu); color: #075985; }
+.alert-warn { background: var(--orange-clair); border-color: var(--orange); color: #92400e; }
+.alert-ok   { background: var(--vert-clair); border-color: var(--vert); color: #047857; }
+.alert-err  { background: var(--rouge-clair); border-color: var(--rouge); color: #991b1b; }
+.alert-icon { font-size: 20px; flex-shrink: 0; }
+
+/* ═══ BOUTONS ═══ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bleu);
+  color: white;
+  border: none;
+  padding: 14px 24px;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 15px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-decoration: none;
+}
+.btn:hover { background: var(--bleu-fonce); transform: translateY(-1px); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+.btn-outline {
+  background: transparent;
+  color: var(--bleu);
+  border: 2px solid var(--bleu);
+}
+.btn-outline:hover { background: var(--bleu); color: white; }
+.btn-success { background: var(--vert); }
+.btn-success:hover { background: #1e8a73; }
+.btn-warn { background: var(--orange); }
+.btn-warn:hover { background: #c87a07; }
+
+/* ═══ DROP ZONE ═══ */
+.dropzone {
+  border: 3px dashed var(--bleu);
+  border-radius: 16px;
+  padding: 48px 24px;
+  text-align: center;
+  background: #f0f9ff;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.dropzone:hover, .dropzone.dragover {
+  background: #e0f2fe;
+  border-color: var(--bleu-fonce);
+}
+.dropzone-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+  display: block;
+}
+.dropzone-text { font-size: 17px; font-weight: 600; margin-bottom: 6px; }
+.dropzone-sub { color: var(--gris); font-size: 14px; }
+
+/* ═══ STATS GRID ═══ */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+  margin: 20px 0;
+}
+.stat-box {
+  background: var(--fond);
+  padding: 18px;
+  border-radius: 12px;
+  border-left: 4px solid var(--bleu);
+}
+.stat-box .stat-label {
+  font-size: 12px;
+  color: var(--gris);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
+.stat-box .stat-val {
+  font-size: 28px;
+  font-weight: 700;
+  font-family: 'Fraunces', serif;
+  color: var(--texte);
+}
+.stat-box.gold { border-color: var(--or); }
+.stat-box.green { border-color: var(--vert); }
+.stat-box.red { border-color: var(--rouge); }
+
+/* ═══ TABLES ═══ */
+.table-wrap { overflow-x: auto; margin: 16px 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+table th, table td {
+  padding: 12px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--gris-clair);
+}
+table th {
+  background: var(--fond);
+  font-weight: 600;
+  color: var(--texte);
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+table tr:hover { background: #fafaf7; }
+table .col-femme { color: #be185d; font-weight: 600; }
+table .col-homme { color: #1e40af; font-weight: 600; }
+
+/* ═══ FORMS ═══ */
+.form-group {
+  margin-bottom: 16px;
+}
+.form-group label {
+  display: block;
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+.form-control {
+  width: 100%;
+  padding: 12px 14px;
+  border: 2px solid var(--gris-clair);
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 15px;
+  background: white;
+  transition: border 0.2s;
+}
+.form-control:focus {
+  outline: none;
+  border-color: var(--bleu);
+}
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+/* ═══ SLOTS LISTE ═══ */
+.liste-section { margin-bottom: 32px; }
+.liste-section h3 {
+  color: var(--bleu);
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--gris-clair);
+}
+.slots-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+.slot {
+  display: grid;
+  grid-template-columns: 50px 100px 1fr 40px;
+  gap: 12px;
+  align-items: center;
+  background: var(--fond);
+  padding: 12px 16px;
+  border-radius: 10px;
+  border-left: 4px solid;
+}
+.slot.slot-F { border-color: #ec4899; background: #fdf2f8; }
+.slot.slot-H { border-color: #3b82f6; background: #eff6ff; }
+.slot .slot-pos {
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--gris);
+}
+.slot .slot-sexe {
+  font-weight: 700;
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: 30px;
+  text-align: center;
+}
+.slot.slot-F .slot-sexe { background: #ec4899; color: white; }
+.slot.slot-H .slot-sexe { background: #3b82f6; color: white; }
+.slot input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1.5px solid var(--gris-clair);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 15px;
+  background: white;
+}
+.slot input:focus { outline: none; border-color: var(--bleu); }
+.slot .slot-status {
+  font-size: 20px;
+  text-align: center;
+}
+
+/* ═══ CONFORMITÉ ═══ */
+.conformite-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin: 16px 0;
+}
+.conf-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--fond);
+  border-radius: 8px;
+  font-size: 13px;
+  border-left: 4px solid var(--gris-clair);
+}
+.conf-item.ok { border-color: var(--vert); background: var(--vert-clair); }
+.conf-item.warn { border-color: var(--orange); background: var(--orange-clair); }
+.conf-item.err { border-color: var(--rouge); background: var(--rouge-clair); }
+.conf-icon { font-size: 18px; }
+
+/* ═══ SIMULATEUR VOIX ═══ */
+.simu-controls {
+  background: var(--fond);
+  padding: 20px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+.simu-slider {
+  width: 100%;
+  margin: 10px 0;
+}
+.simu-result {
+  background: linear-gradient(135deg, var(--bleu) 0%, var(--bleu-fonce) 100%);
+  color: white;
+  padding: 24px;
+  border-radius: 14px;
+  margin: 16px 0;
+}
+.simu-result .big-num {
+  font-family: 'Fraunces', serif;
+  font-size: 48px;
+  font-weight: 900;
+  color: var(--or);
+}
+.voix-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.voix-box {
+  background: rgba(255,255,255,0.15);
+  padding: 12px;
+  border-radius: 10px;
+  text-align: center;
+}
+.voix-box .voix-n {
+  font-size: 24px;
+  font-weight: 700;
+  font-family: 'Fraunces', serif;
+}
+.voix-box .voix-l {
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+/* ═══ CHECKLIST PRESTATAIRES ═══ */
+.checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.checklist li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--fond);
+  border-radius: 10px;
+  margin-bottom: 8px;
+}
+.checklist input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  accent-color: var(--bleu);
+  flex-shrink: 0;
+}
+.checklist label { cursor: pointer; flex: 1; }
+
+/* ═══ CONTACT FO ═══ */
+.fo-contact {
+  background: linear-gradient(135deg, var(--rouge-fo) 0%, var(--rouge-fonce) 100%);
+  color: white;
+  padding: 32px;
+  border-radius: 16px;
+  text-align: center;
+  margin: 32px 0;
+}
+.fo-contact h3 {
+  font-family: 'Fraunces', serif;
+  font-size: 22px;
+  margin-bottom: 12px;
+  color: white;
+}
+.fo-contact a {
+  color: var(--or);
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 1.5px solid var(--or);
+}
+
+/* ═══ FOOTER ═══ */
+footer {
+  text-align: center;
+  padding: 32px;
+  color: var(--gris);
+  font-size: 13px;
+}
+footer a { color: var(--bleu); text-decoration: none; }
+
+/* ═══ MODE LECTURE UNIVERSELLE (a11y daltoniens/dys) ═══ */
+.a11y-toggle {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: var(--texte);
+  color: white;
+  border: none;
+  padding: 12px 16px;
+  border-radius: 50px;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 999;
+}
+.a11y-toggle:hover { transform: scale(1.05); }
+
+body.a11y-mode {
+  background: var(--a11y-fond);
+  color: var(--a11y-texte);
+  font-family: 'Atkinson Hyperlegible', sans-serif;
+  font-size: 17px;
+  line-height: 1.7;
+}
+body.a11y-mode .card,
+body.a11y-mode .stat-box,
+body.a11y-mode .slot,
+body.a11y-mode .conf-item,
+body.a11y-mode .checklist li,
+body.a11y-mode .form-control,
+body.a11y-mode .dropzone {
+  background: var(--a11y-fond);
+  border: 2px solid var(--a11y-texte);
+  color: var(--a11y-texte);
+}
+body.a11y-mode .header,
+body.a11y-mode .simu-result,
+body.a11y-mode .fo-contact {
+  background: var(--a11y-fond);
+  color: var(--a11y-texte);
+  border: 3px solid var(--a11y-texte);
+}
+body.a11y-mode .header h1,
+body.a11y-mode .header h1 em,
+body.a11y-mode .badge,
+body.a11y-mode .simu-result .big-num,
+body.a11y-mode .fo-contact h3,
+body.a11y-mode .fo-contact a {
+  color: var(--a11y-texte);
+}
+body.a11y-mode .badge { background: var(--a11y-texte); color: var(--a11y-fond); }
+body.a11y-mode .btn {
+  background: var(--a11y-texte);
+  color: var(--a11y-fond);
+  border: 2px solid var(--a11y-texte);
+}
+body.a11y-mode .card h2, body.a11y-mode .card h3,
+body.a11y-mode .liste-section h3 { color: var(--a11y-accent); }
+body.a11y-mode .alert,
+body.a11y-mode .conf-item { background: var(--a11y-fond); border-left-width: 6px; }
+body.a11y-mode .conf-item.ok,
+body.a11y-mode .alert-ok { border-color: var(--a11y-ok); }
+body.a11y-mode .conf-item.err,
+body.a11y-mode .alert-err { border-color: var(--a11y-erreur); }
+body.a11y-mode .stat-box .stat-val,
+body.a11y-mode .voix-box .voix-n { color: var(--a11y-texte); font-family: 'Atkinson Hyperlegible', sans-serif; }
+body.a11y-mode .tab-btn.active {
+  background: var(--a11y-texte);
+  color: var(--a11y-fond);
+}
+body.a11y-mode .slot.slot-F,
+body.a11y-mode .slot.slot-H { background: var(--a11y-fond); }
+body.a11y-mode .slot .slot-sexe { background: var(--a11y-texte); color: var(--a11y-fond); }
+
+/* IMPRESSION */
+@media print {
+  .a11y-toggle, .tabs, .dropzone, .btn, footer { display: none !important; }
+  .tab-content { display: block !important; page-break-before: always; }
+  .card { box-shadow: none; border: 1px solid #ccc; }
+}
+
+@media (max-width: 720px) {
+  .page { padding: 20px 14px 60px; }
+  .header { padding: 28px 24px; }
+  .card { padding: 22px; }
+  .slot { grid-template-columns: 40px 60px 1fr 30px; gap: 8px; padding: 10px; }
+}
+</style>
+</head>
+
+<body>
+<a class="skip-link" href="#main">Aller au contenu principal</a>
+
+<div class="page">
+
+<!-- ═══════════════════ HEADER ═══════════════════ -->
+<header class="header">
+  <span class="badge">Outil militants · CSE 2027</span>
+  <h1>Constructeur de <em>liste électorale CSE</em></h1>
+  <p class="subtitle">Outil d'aide à la composition des listes de candidats FO pour les élections du CSE, conforme au Code du travail (L. 2314-30, R. 2314-1, R. 2314-19).</p>
+  <div class="rgpd-badge">
+    <span aria-hidden="true">🔒</span>
+    <span><strong>RGPD :</strong> tout est traité dans votre navigateur. Aucune donnée n'est envoyée sur Internet.</span>
+  </div>
+</header>
+
+<!-- ═══════════════════ ONGLETS ═══════════════════ -->
+<nav class="tabs" aria-label="Étapes">
+  <button class="tab-btn active" data-tab="accueil"><span class="step-num">1</span>Accueil</button>
+  <button class="tab-btn" data-tab="import"><span class="step-num">2</span>Import fichier</button>
+  <button class="tab-btn" data-tab="constructeur"><span class="step-num">3</span>Constructeur</button>
+  <button class="tab-btn" data-tab="simulateur"><span class="step-num">4</span>Simulateur voix</button>
+  <button class="tab-btn" data-tab="prestataires"><span class="step-num">5</span>Prestataires</button>
+</nav>
+
+<main id="main">
+
+<!-- ═══════════════════ ONGLET 1 : ACCUEIL ═══════════════════ -->
+<section class="tab-content active" id="tab-accueil">
+
+  <div class="card">
+    <h2>Bienvenue militant FO</h2>
+    <p>Cet outil vous aide à <strong>construire une liste de candidats CSE rigoureusement conforme</strong> aux exigences du Code du travail. Il s'appuie uniquement sur un fichier <strong>anonymisé</strong> des salariés de l'établissement (sexe + collège), et calcule pour vous toutes les contraintes légales.</p>
+
+    <h3>Pourquoi cet outil ?</h3>
+    <p>Le non-respect de la règle de représentation équilibrée des femmes et des hommes (article L. 2314-30) entraîne, sur saisine devant le juge judiciaire, <strong>l'annulation de l'élection des candidats du sexe surreprésenté</strong> (art. L. 2314-32). Construire une liste légalement valide est donc impératif.</p>
+
+    <h3>Ce que fait l'outil</h3>
+    <ul>
+      <li>Calcule automatiquement le <strong>nombre de sièges</strong> titulaires et suppléants en fonction de l'effectif (R. 2314-1).</li>
+      <li>Détermine pour chaque collège la <strong>proportion légale femmes/hommes</strong> sur la liste (L. 2314-30).</li>
+      <li>Génère des <strong>slots de candidats</strong> pré-cadrés avec alternance F/H imposée.</li>
+      <li>Affiche en temps réel des <strong>indicateurs de conformité</strong>.</li>
+      <li>Calcule le <strong>nombre de voix nécessaires</strong> pour faire élire 1, 2, 3… militants FO (R. 2314-19).</li>
+      <li>Génère un <strong>export Excel et PDF</strong> de la liste à présenter au protocole d'accord préélectoral (PAP).</li>
+    </ul>
+
+    <h3>Marche à suivre</h3>
+    <ol>
+      <li><strong>Onglet "Import fichier"</strong> : déposez le fichier des salariés (Excel anonymisé).</li>
+      <li><strong>Onglet "Constructeur"</strong> : choisissez votre UM (établissement CSE), saisissez les initiales/pseudos des candidats.</li>
+      <li><strong>Onglet "Simulateur voix"</strong> : visualisez combien de voix il faut pour faire élire N militants FO.</li>
+      <li><strong>Onglet "Prestataires"</strong> : consultez le guide et la checklist pour s'assurer du droit de vote des salariés mis à disposition.</li>
+      <li>Exportez vos listes en Excel ou PDF.</li>
+    </ol>
+
+    <div class="alert alert-info">
+      <span class="alert-icon" aria-hidden="true">🛡️</span>
+      <div><strong>Confidentialité absolue.</strong> Le fichier des salariés ne quitte jamais votre navigateur. L'outil n'envoie aucune donnée vers un serveur. Vous pouvez l'utiliser hors ligne après le premier chargement.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Cadre légal — sources officielles</h2>
+    <p>Toutes les règles appliquées par l'outil reposent sur le Code du travail (vérifiez en cas de doute sur <a href="https://www.legifrance.gouv.fr" target="_blank" rel="noopener">Légifrance</a>) :</p>
+    <ul>
+      <li><a href="https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000006901882" target="_blank" rel="noopener"><strong>L. 2314-11</strong></a> — composition des collèges (3<sup>e</sup> collège dès 25 cadres).</li>
+      <li><a href="https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000018485479" target="_blank" rel="noopener"><strong>R. 2314-1</strong></a> — tableau nombre de titulaires par effectif.</li>
+      <li><a href="https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000006901904" target="_blank" rel="noopener"><strong>L. 2314-30</strong></a> — représentation équilibrée F/H, alternance, arrondi.</li>
+      <li><a href="https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000035615701" target="_blank" rel="noopener"><strong>L. 2314-32</strong></a> — sanctions du juge en cas de non-respect (annulation d'élus).</li>
+      <li><a href="https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000006901903" target="_blank" rel="noopener"><strong>L. 2314-29</strong></a> — scrutin proportionnel à 2 tours, quorum 50 %, ratures 10 %.</li>
+      <li><a href="https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000018485529" target="_blank" rel="noopener"><strong>R. 2314-19</strong></a> — quotient électoral = suffrages valablement exprimés / sièges.</li>
+      <li><a href="https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000018485531" target="_blank" rel="noopener"><strong>R. 2314-20</strong></a> — attribution des sièges restants à la plus forte moyenne.</li>
+      <li><a href="https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000006901895" target="_blank" rel="noopener"><strong>L. 2314-23</strong></a> — éligibilité au vote des salariés mis à disposition (prestataires).</li>
+    </ul>
+  </div>
+
+</section>
+
+<!-- ═══════════════════ ONGLET 2 : IMPORT ═══════════════════ -->
+<section class="tab-content" id="tab-import">
+
+  <div class="card">
+    <h2>Importer le fichier des salariés</h2>
+
+    <div class="alert alert-warn">
+      <span class="alert-icon" aria-hidden="true">⚠️</span>
+      <div>Le fichier doit contenir <strong>au minimum</strong> les colonnes <code>SEXE</code> (Masculin / Féminin), <code>COLLEGE</code> (Exécution / Maîtrise / Cadre) et une colonne d'<strong>établissement</strong> (par exemple <code>UM</code>). Toutes les données nominatives (nom, prénom, mail, NNI...) doivent être supprimées avant import. Format accepté : <code>.xlsx</code> ou <code>.csv</code>.</div>
+    </div>
+
+    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Importer un fichier">
+      <span class="dropzone-icon" aria-hidden="true">📊</span>
+      <div class="dropzone-text">Déposez votre fichier ici ou cliquez pour parcourir</div>
+      <div class="dropzone-sub">Fichier traité localement, jamais envoyé sur Internet</div>
+      <input type="file" id="file-input" accept=".xlsx,.xls,.csv" style="display:none">
+    </div>
+
+    <div id="import-result" style="display:none; margin-top:20px;"></div>
+  </div>
+
+  <div class="card">
+    <h2>Structure attendue du fichier</h2>
+    <p>Voici un exemple de structure conforme :</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>SEXE</th><th>COLLEGE</th><th>UM</th><th>DUM</th><th>SDUM</th><th>LIEU DE TRAVAIL</th></tr></thead>
+        <tbody>
+          <tr><td>Masculin</td><td>Exécution</td><td>DIR RESEAUX EST</td><td>DIEM EST CHAMPAGNE</td><td>AI CHAMP-ARDENNES</td><td>BEZANNES</td></tr>
+          <tr><td>Féminin</td><td>Maîtrise</td><td>DIR RESEAUX EST</td><td>DIEM EST LORRAINE</td><td>AI LORRAINE</td><td>NANCY</td></tr>
+          <tr><td>Masculin</td><td>Cadre</td><td>DIR RESEAUX EST</td><td>DEL ACHATS APPROS EST</td><td>POLE AQP EST</td><td>CHATENOY LE ROYAL</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:12px; font-size:13px; color:var(--gris);">L'outil reconnaît également les variantes <code>H/F</code>, <code>M/F</code>, <code>HOMME/FEMME</code>, <code>Homme/Femme</code> pour la colonne sexe. Les lignes contenant <code>#N/A</code> ou vides sont signalées et exclues du calcul.</p>
+  </div>
+
+</section>
+
+<!-- ═══════════════════ ONGLET 3 : CONSTRUCTEUR ═══════════════════ -->
+<section class="tab-content" id="tab-constructeur">
+
+  <div class="card">
+    <h2>Paramètres de l'élection</h2>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label for="select-um">Établissement CSE (UM)</label>
+        <select id="select-um" class="form-control">
+          <option value="">— Importez d'abord un fichier —</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="effectif-info" style="display:none;"></div>
+  </div>
+
+  <div id="zone-construction" style="display:none;">
+    <div class="card">
+      <h2>Listes par collège</h2>
+      <p>Pour chaque collège, l'outil a calculé le nombre de sièges (au prorata des effectifs) et la composition F/H légale (article L. 2314-30). Saisissez les initiales ou pseudonymes de vos candidats dans les slots ci-dessous. <strong>L'alternance F/H est imposée par la position</strong>.</p>
+
+      <div id="conformite-globale" class="conformite-grid"></div>
+
+      <div id="listes-conteneur"></div>
+
+      <div style="margin-top:24px; display:flex; gap:12px; flex-wrap:wrap;">
+        <button class="btn btn-success" id="btn-export-xlsx">📊 Exporter en Excel</button>
+        <button class="btn" id="btn-export-pdf">📄 Exporter en PDF</button>
+        <button class="btn btn-outline" id="btn-reset">↻ Réinitialiser</button>
+      </div>
+    </div>
+  </div>
+
+</section>
+
+<!-- ═══════════════════ ONGLET 4 : SIMULATEUR VOIX ═══════════════════ -->
+<section class="tab-content" id="tab-simulateur">
+
+  <div class="card">
+    <h2>Combien de voix pour faire élire 1, 2, 3 militants ?</h2>
+    <p>Le scrutin CSE est <strong>proportionnel à la plus forte moyenne</strong>. Le <strong>quotient électoral</strong> (R. 2314-19) détermine le nombre de voix nécessaires par siège : <code>quotient = suffrages valablement exprimés ÷ nombre de sièges</code>. Cet outil simule, pour chaque collège, combien de voix la liste FO doit obtenir pour décrocher 1, 2, 3 élus, selon différents taux de participation.</p>
+
+    <div class="alert alert-info">
+      <span class="alert-icon" aria-hidden="true">ℹ️</span>
+      <div><strong>Quorum 1<sup>er</sup> tour (L. 2314-29) :</strong> si les votants sont moins de la moitié des inscrits, il est procédé à un 2<sup>e</sup> tour dans les 15 jours, ouvert aux listes non-syndicales.</div>
+    </div>
+
+    <div id="simu-content">
+      <p style="text-align:center; padding:40px; color:var(--gris);">Importez un fichier et choisissez un établissement dans l'onglet "Constructeur" pour voir les simulations.</p>
+    </div>
+  </div>
+
+</section>
+
+<!-- ═══════════════════ ONGLET 5 : PRESTATAIRES ═══════════════════ -->
+<section class="tab-content" id="tab-prestataires">
+
+  <div class="card">
+    <h2>Salariés mis à disposition (prestataires)</h2>
+    <p>Les salariés des entreprises prestataires (SPIE, ENGIE Solutions, Eiffage Énergie, intérim…) qui travaillent dans nos locaux <strong>ont le droit de voter aux élections CSE de l'entreprise utilisatrice</strong> (GRDF, EDF…) sous certaines conditions, mais ils peuvent l'ignorer. C'est aux militants FO de s'assurer qu'ils sont informés et qu'ils choisissent FO si possible.</p>
+
+    <h3>Cadre légal (article L. 2314-23)</h3>
+    <ul>
+      <li><strong>Condition de présence :</strong> 12 mois continus dans l'entreprise utilisatrice pour y être électeur.</li>
+      <li><strong>Non éligibles</strong> dans l'entreprise utilisatrice (ils ne peuvent donc pas figurer sur les listes FO GRDF).</li>
+      <li><strong>Droit de choix :</strong> ils choisissent de voter soit chez leur employeur d'origine, soit chez l'utilisateur — pas les deux.</li>
+    </ul>
+
+    <h3>Pourquoi c'est stratégique pour FO</h3>
+    <p>Dans certains établissements, les prestataires éligibles représentent un volume significatif d'électeurs potentiels. S'assurer qu'ils sont informés de leur droit et qu'ils l'exercent <strong>en faveur du CSE de l'entreprise utilisatrice</strong> peut faire basculer le quotient électoral d'un collège.</p>
+
+    <div class="alert alert-warn">
+      <span class="alert-icon" aria-hidden="true">⚖️</span>
+      <div>Le défaut d'information des prestataires éligibles peut être un motif de contestation devant le juge (L. 2314-32). En tant que militant FO, vous pouvez et devez signaler à l'employeur tout manquement à cette obligation d'information.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Checklist de contrôle prestataires</h2>
+    <p>Cochez chaque action menée. Vous pouvez ensuite imprimer cette page comme preuve de votre démarche.</p>
+
+    <ul class="checklist">
+      <li>
+        <input type="checkbox" id="ck1">
+        <label for="ck1"><strong>Identifier les prestataires présents</strong> dans l'établissement depuis au moins 12 mois continus (demande à la DRH ou comptage terrain). Un registre nominatif doit être tenu par l'employeur (L. 1111-2).</label>
+      </li>
+      <li>
+        <input type="checkbox" id="ck2">
+        <label for="ck2"><strong>Demander à l'employeur</strong>, par écrit, la liste des salariés mis à disposition éligibles (et garder une trace de la demande et de la réponse).</label>
+      </li>
+      <li>
+        <input type="checkbox" id="ck3">
+        <label for="ck3"><strong>Vérifier que l'employeur les a informés</strong> de leur droit de choisir leur entreprise de vote — par tout moyen (note de service, mail, affichage). Demander copie du message d'information.</label>
+      </li>
+      <li>
+        <input type="checkbox" id="ck4">
+        <label for="ck4"><strong>Diffuser une communication FO ciblée</strong> aux prestataires identifiés (tract, mail, affichage local) leur rappelant qu'ils peuvent voter chez nous et présentant les engagements FO.</label>
+      </li>
+      <li>
+        <input type="checkbox" id="ck5">
+        <label for="ck5"><strong>Recueillir individuellement leur choix</strong> (vote ici ou chez leur employeur d'origine) — ce choix doit être formalisé par écrit et transmis à l'employeur utilisateur.</label>
+      </li>
+      <li>
+        <input type="checkbox" id="ck6">
+        <label for="ck6"><strong>Vérifier l'inscription sur les listes électorales</strong> des prestataires ayant choisi de voter chez l'utilisateur. Toute omission doit être signalée à l'employeur AVANT clôture des listes.</label>
+      </li>
+      <li>
+        <input type="checkbox" id="ck7">
+        <label for="ck7"><strong>Conserver toutes les preuves</strong> (mails, accusés, notes) jusqu'à l'expiration du délai de contestation (15 jours après la proclamation des résultats).</label>
+      </li>
+      <li>
+        <input type="checkbox" id="ck8">
+        <label for="ck8"><strong>Tenir un tableau de suivi</strong> par établissement : nombre de prestataires éligibles, nombre informés, nombre ayant choisi de voter chez l'utilisateur, nombre effectivement inscrits.</label>
+      </li>
+    </ul>
+
+    <button class="btn btn-outline" onclick="window.print()" style="margin-top:16px;">🖨️ Imprimer cette checklist</button>
+  </div>
+
+  <div class="card">
+    <h2>Modèle de courrier à l'employeur</h2>
+    <p>Vous pouvez vous inspirer du modèle ci-dessous pour demander officiellement la liste des prestataires éligibles :</p>
+
+    <pre style="background:var(--fond); padding:20px; border-radius:12px; font-family:'Atkinson Hyperlegible', monospace; font-size:13px; white-space:pre-wrap; border-left:4px solid var(--bleu);">À l'attention de la Direction des Ressources Humaines
+Objet : Élections CSE 2027 — communication de la liste des salariés mis à disposition éligibles à l'électorat
+
+Madame, Monsieur,
+
+Dans le cadre de la préparation des élections du Comité Social et Économique prévues fin 2027, l'organisation syndicale Force Ouvrière vous sollicite afin d'obtenir, au titre de l'article L. 2314-23 du Code du travail, la liste nominative des salariés mis à disposition dans nos locaux justifiant d'au moins douze mois continus de présence à la date de référence retenue pour l'établissement des listes électorales.
+
+Nous vous remercions également de bien vouloir nous confirmer par retour les modalités d'information de ces salariés sur leur droit de choisir entre voter dans leur entreprise d'origine ou dans l'entreprise utilisatrice, ainsi que la date butoir fixée pour la manifestation de ce choix.
+
+Cette demande relève de notre mission de représentation de l'ensemble des salariés présents dans l'établissement et de notre devoir de vigilance quant à la régularité des opérations électorales (art. L. 2314-32).
+
+Restant à votre disposition pour toute précision, nous vous prions d'agréer, Madame, Monsieur, l'expression de nos salutations distinguées.
+
+Pour la délégation syndicale FO
+[Nom — Fonction — Date]</pre>
+  </div>
+
+</section>
+
+</main>
+
+<!-- ═══════════════════ CONTACT FO ═══════════════════ -->
+<div class="fo-contact">
+  <h3>Besoin d'aide pour utiliser l'outil ou monter votre liste ?</h3>
+  <p>Contactez la délégation FO GRDF : <a href="mailto:syndicat-fo_grdf-delegations-nationales@grdf.fr">syndicat-fo_grdf-delegations-nationales@grdf.fr</a></p>
+  <p style="margin-top:12px; font-size:14px;">Suivez-nous : <a href="https://www.instagram.com/FO_GRDF" target="_blank" rel="noopener">@FO_GRDF</a></p>
+</div>
+
+<footer>
+  <p>Outil <strong>FO Énergie GRDF</strong> · Élections professionnelles CSE 2027</p>
+  <p style="margin-top:6px;">Sources : Légifrance — Code du travail. Aucune donnée n'est envoyée sur Internet, tout est traité dans votre navigateur.</p>
+</footer>
+
+</div>
+
+<button class="a11y-toggle" id="a11y-btn" aria-pressed="false" aria-label="Activer le mode lecture universelle">
+  <span aria-hidden="true">👁️</span>
+  <span>Mode lecture universelle</span>
+</button>
+
+<script>
+/* ═══════════════════════════════════════════════════
+   ALGORITHME CSE 2027 — FO GRDF
+   Sources : Légifrance — Code du travail
+   ═══════════════════════════════════════════════════ */
+
+// ─── R. 2314-1 : tableau effectif → nb titulaires ─────────────
+const R_2314_1 = [
+  [11,24,1],[25,49,2],[50,74,4],[75,99,5],[100,124,6],[125,149,7],[150,174,8],
+  [175,199,9],[200,249,10],[250,299,11],[300,399,11],[400,499,12],[500,599,13],
+  [600,699,14],[700,799,14],[800,899,15],[900,999,16],[1000,1249,17],[1250,1499,18],
+  [1500,1749,20],[1750,1999,21],[2000,2249,22],[2250,2499,23],[2500,2749,24],
+  [2750,2999,24],[3000,3249,25],[3250,3499,25],[3500,3749,26],[3750,3999,26],
+  [4000,4249,26],[4250,4499,27],[4500,4749,27],[4750,4999,28],[5000,5249,29],
+  [5250,5499,29],[5500,5749,29],[5750,5999,30],[6000,6249,31],[6250,6499,31],
+  [6500,6749,31],[6750,6999,31],[7000,7249,32],[7250,7499,32],[7500,7749,32],
+  [7750,7999,32],[8000,8249,32],[8250,8499,33],[8500,8749,33],[8750,8999,33],
+  [9000,9249,34],[9250,9499,34],[9500,9749,34],[9750,9999,34]
+];
+function nbTitulaires(eff) {
+  if (eff < 11) return 0;
+  if (eff >= 10000) return 35;
+  for (const [mn, mx, n] of R_2314_1) if (eff >= mn && eff <= mx) return n;
+  return 0;
+}
+
+// ─── L. 2314-30 : arrondi légal ───────────────────────────────
+function arrondiLegal(x) {
+  const decimale = x - Math.floor(x);
+  return decimale >= 0.5 ? Math.ceil(x) : Math.floor(x);
+}
+
+// ─── L. 2314-30 : composition légale d'une liste ──────────────
+function compositionListe(nbF, nbH, nbSieges) {
+  const inscrits = nbF + nbH;
+  if (inscrits === 0 || nbSieges === 0) {
+    return { inscrits, nbF, nbH, propF: 0, propH: 0, candF: 0, candH: 0, candFBrut: 0, candHBrut: 0, sieges: nbSieges, alerte: 'Effectif ou sièges nuls' };
+  }
+  const propF = nbF / inscrits;
+  const propH = nbH / inscrits;
+  const candFBrut = propF * nbSieges;
+  const candHBrut = propH * nbSieges;
+  let candF = arrondiLegal(candFBrut);
+  let candH = arrondiLegal(candHBrut);
+  let alerte = null;
+  // Égalité parfaite + sièges impairs : 1 H ou F indifféremment
+  if (nbF === nbH && nbSieges % 2 === 1 && candF + candH !== nbSieges) {
+    candH = Math.ceil(nbSieges / 2);
+    candF = Math.floor(nbSieges / 2);
+    alerte = 'Égalité parfaite F/H, sièges impairs : 1 candidat supplémentaire au choix.';
+  }
+  // Réajustement si arrondis incohérents
+  if (candF + candH !== nbSieges) {
+    if (candF + candH > nbSieges) {
+      if (candFBrut % 1 < candHBrut % 1) candF--; else candH--;
+    } else {
+      if (candFBrut % 1 > candHBrut % 1) candF++; else candH++;
+    }
+  }
+  // Cas exclusion totale d'un sexe : autorisé d'ajouter 1 candidat, mais pas en pos 1
+  let canAddMinority = null;
+  if (candF === 0 && nbF > 0) canAddMinority = 'F';
+  if (candH === 0 && nbH > 0) canAddMinority = 'H';
+  return { inscrits, nbF, nbH, propF, propH, candFBrut, candHBrut, candF, candH, sieges: nbSieges, alerte, canAddMinority };
+}
+
+// ─── L. 2314-30 : alternance F/H imposée ──────────────────────
+function genererSlots(candF, candH) {
+  // Sexe majoritaire en tête, alternance jusqu'à épuisement du minoritaire
+  let majoritaire, minoritaire, nbMaj, nbMin;
+  if (candF >= candH) { majoritaire = 'F'; minoritaire = 'H'; nbMaj = candF; nbMin = candH; }
+  else { majoritaire = 'H'; minoritaire = 'F'; nbMaj = candH; nbMin = candF; }
+  const slots = [];
+  let i = 0, j = 0;
+  while (i < nbMaj || j < nbMin) {
+    if (i < nbMaj) { slots.push(majoritaire); i++; }
+    if (j < nbMin) { slots.push(minoritaire); j++; }
+  }
+  return slots;
+}
+
+/* ═══════════════════════════════════════════════════
+   ÉTAT GLOBAL DE L'APPLICATION
+   ═══════════════════════════════════════════════════ */
+const state = {
+  raw: [],            // lignes brutes valides
+  ignored: 0,         // lignes ignorées (#N/A, vides)
+  ums: [],            // liste UM disponibles
+  selectedUM: null,
+  candidats: {}       // { titulaires: { collège: [initiales par slot] }, suppleants: idem }
+};
+
+/* ═══════════════════════════════════════════════════
+   NAVIGATION ONGLETS
+   ═══════════════════════════════════════════════════ */
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+});
+
+/* ═══════════════════════════════════════════════════
+   MODE LECTURE UNIVERSELLE (accessibilité)
+   ═══════════════════════════════════════════════════ */
+const a11yBtn = document.getElementById('a11y-btn');
+a11yBtn.addEventListener('click', () => {
+  document.body.classList.toggle('a11y-mode');
+  const on = document.body.classList.contains('a11y-mode');
+  a11yBtn.setAttribute('aria-pressed', on);
+  a11yBtn.querySelector('span:last-child').textContent = on ? 'Mode normal' : 'Mode lecture universelle';
+});
+
+/* ═══════════════════════════════════════════════════
+   IMPORT DU FICHIER
+   ═══════════════════════════════════════════════════ */
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('file-input');
+const importResult = document.getElementById('import-result');
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); } });
+dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+dropzone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropzone.classList.remove('dragover');
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', (e) => { if (e.target.files.length) handleFile(e.target.files[0]); });
+
+function normaliserSexe(v) {
+  if (!v) return null;
+  const s = String(v).trim().toUpperCase();
+  if (['M', 'H', 'MASCULIN', 'HOMME', 'MR', 'MONSIEUR'].includes(s)) return 'Masculin';
+  if (['F', 'FEMININ', 'FÉMININ', 'FEMME', 'MME', 'MADAME'].includes(s)) return 'Féminin';
+  return null;
+}
+function normaliserCollege(v) {
+  if (!v) return null;
+  const s = String(v).trim();
+  const u = s.toUpperCase();
+  if (u.includes('EXEC') || u.includes('OUVRIER') || u === '1' || u === 'I' || u === '1ER') return 'Exécution';
+  if (u.includes('MAIT') || u.includes('MAÎT') || u.includes('TECH') || u === '2' || u === 'II' || u === '2EME' || u === '2ÈME') return 'Maîtrise';
+  if (u.includes('CADRE') || u.includes('ING') || u === '3' || u === 'III' || u === '3EME' || u === '3ÈME') return 'Cadre';
+  return null;
+}
+
+function handleFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: null });
+      processRows(rows, file.name);
+    } catch (err) {
+      importResult.style.display = 'block';
+      importResult.innerHTML = `<div class="alert alert-err"><span class="alert-icon">❌</span><div>Erreur de lecture du fichier : ${err.message}</div></div>`;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function processRows(rows, fileName) {
+  if (!rows.length) {
+    importResult.style.display = 'block';
+    importResult.innerHTML = `<div class="alert alert-err"><span class="alert-icon">❌</span><div>Le fichier est vide.</div></div>`;
+    return;
+  }
+  // Détecter colonnes (recherche flexible)
+  const headers = Object.keys(rows[0]);
+  const findCol = (patterns) => headers.find(h => patterns.some(p => h.toUpperCase().includes(p)));
+  const colSexe = findCol(['SEXE', 'GENRE']);
+  const colCol = findCol(['COLLEGE', 'COLLÈGE']);
+  const colUM = findCol(['UM', 'UNITE', 'UNITÉ', 'ETABLISSEMENT', 'ÉTABLISSEMENT', 'DIRECTION']);
+  if (!colSexe || !colCol || !colUM) {
+    importResult.style.display = 'block';
+    importResult.innerHTML = `<div class="alert alert-err"><span class="alert-icon">❌</span><div>Colonnes manquantes. Trouvées : ${headers.join(', ')}. Requises : SEXE, COLLEGE, et une colonne UM/établissement.</div></div>`;
+    return;
+  }
+  state.raw = [];
+  state.ignored = 0;
+  for (const row of rows) {
+    const sexe = normaliserSexe(row[colSexe]);
+    const college = normaliserCollege(row[colCol]);
+    const um = row[colUM] ? String(row[colUM]).trim() : null;
+    if (!sexe || !college || !um || um.toUpperCase().includes('#N/A')) {
+      state.ignored++;
+      continue;
+    }
+    state.raw.push({ sexe, college, um });
+  }
+  state.ums = [...new Set(state.raw.map(r => r.um))].sort();
+  renderImportResult(fileName);
+  populateUMSelect();
+}
+
+function renderImportResult(fileName) {
+  const total = state.raw.length;
+  const collMap = { 'Exécution': 0, 'Maîtrise': 0, 'Cadre': 0 };
+  const sexeMap = { 'Masculin': 0, 'Féminin': 0 };
+  state.raw.forEach(r => { collMap[r.college]++; sexeMap[r.sexe]++; });
+  importResult.style.display = 'block';
+  importResult.innerHTML = `
+    <div class="alert alert-ok"><span class="alert-icon">✅</span><div><strong>Fichier importé :</strong> ${fileName} — ${total} lignes exploitables sur ${total + state.ignored} (${state.ignored} ignorées : #N/A, sexe ou collège manquant).</div></div>
+    <div class="stats-grid">
+      <div class="stat-box"><div class="stat-label">Total salariés</div><div class="stat-val">${total.toLocaleString('fr-FR')}</div></div>
+      <div class="stat-box gold"><div class="stat-label">Établissements (UM)</div><div class="stat-val">${state.ums.length}</div></div>
+      <div class="stat-box"><div class="stat-label">Exécution</div><div class="stat-val">${collMap['Exécution'].toLocaleString('fr-FR')}</div></div>
+      <div class="stat-box"><div class="stat-label">Maîtrise</div><div class="stat-val">${collMap['Maîtrise'].toLocaleString('fr-FR')}</div></div>
+      <div class="stat-box"><div class="stat-label">Cadre</div><div class="stat-val">${collMap['Cadre'].toLocaleString('fr-FR')}</div></div>
+      <div class="stat-box red"><div class="stat-label">Femmes</div><div class="stat-val">${sexeMap['Féminin'].toLocaleString('fr-FR')}</div></div>
+      <div class="stat-box"><div class="stat-label">Hommes</div><div class="stat-val">${sexeMap['Masculin'].toLocaleString('fr-FR')}</div></div>
+    </div>
+    <div style="margin-top:16px;">
+      <button class="btn" onclick="document.querySelector('[data-tab=constructeur]').click()">→ Passer au constructeur de liste</button>
+    </div>
+  `;
+}
+
+function populateUMSelect() {
+  const sel = document.getElementById('select-um');
+  sel.innerHTML = '<option value="">— Choisir un établissement (UM) —</option>' +
+    state.ums.map(u => {
+      const eff = state.raw.filter(r => r.um === u).length;
+      return `<option value="${u.replace(/"/g, '&quot;')}">${u} (${eff} salariés)</option>`;
+    }).join('');
+}
+
+/* ═══════════════════════════════════════════════════
+   CONSTRUCTEUR DE LISTE
+   ═══════════════════════════════════════════════════ */
+document.getElementById('select-um').addEventListener('change', (e) => {
+  state.selectedUM = e.target.value || null;
+  if (state.selectedUM) {
+    state.candidats = { titulaires: {}, suppleants: {} };
+    renderConstructeur();
+    renderSimulateur();
+  } else {
+    document.getElementById('zone-construction').style.display = 'none';
+    document.getElementById('effectif-info').style.display = 'none';
+  }
+});
+
+function calculsUM(um) {
+  const lignes = state.raw.filter(r => r.um === um);
+  const effectif = lignes.length;
+  const nbTit = nbTitulaires(effectif);
+  // Collèges présents + comptage
+  const colleges = ['Exécution', 'Maîtrise', 'Cadre'];
+  const detail = {};
+  colleges.forEach(c => {
+    const sub = lignes.filter(r => r.college === c);
+    if (sub.length === 0) return;
+    detail[c] = {
+      effectif: sub.length,
+      nbF: sub.filter(r => r.sexe === 'Féminin').length,
+      nbH: sub.filter(r => r.sexe === 'Masculin').length
+    };
+  });
+  // Sièges au prorata effectifs (méthode Hare/plus grand reste)
+  const collegesPresents = Object.keys(detail);
+  const totalEff = collegesPresents.reduce((s, c) => s + detail[c].effectif, 0);
+  let restant = nbTit;
+  const sieges = {};
+  const brut = {};
+  collegesPresents.forEach(c => {
+    brut[c] = (detail[c].effectif / totalEff) * nbTit;
+    sieges[c] = Math.max(1, Math.floor(brut[c]));  // au moins 1 siège par collège présent
+    restant -= sieges[c];
+  });
+  // Distribuer le reste par plus grand reste
+  const restes = collegesPresents.map(c => ({ c, r: brut[c] - Math.floor(brut[c]) })).sort((a, b) => b.r - a.r);
+  for (let k = 0; k < restant && k < restes.length; k++) sieges[restes[k].c]++;
+  // Si négatif (parce qu'on a forcé 1 minimum), on rééquilibre
+  while (Object.values(sieges).reduce((a,b)=>a+b,0) > nbTit) {
+    let maxC = collegesPresents[0];
+    collegesPresents.forEach(c => { if (sieges[c] > sieges[maxC]) maxC = c; });
+    if (sieges[maxC] > 1) sieges[maxC]--; else break;
+  }
+  // Composition légale par collège
+  const composition = {};
+  collegesPresents.forEach(c => {
+    composition[c] = compositionListe(detail[c].nbF, detail[c].nbH, sieges[c]);
+  });
+  return { effectif, nbTit, detail, sieges, composition, ignored: state.ignored };
+}
+
+function renderConstructeur() {
+  const data = calculsUM(state.selectedUM);
+  // Info effectif
+  const info = document.getElementById('effectif-info');
+  info.style.display = 'block';
+  info.innerHTML = `
+    <div class="stats-grid" style="margin-top:20px;">
+      <div class="stat-box"><div class="stat-label">Effectif total</div><div class="stat-val">${data.effectif.toLocaleString('fr-FR')}</div></div>
+      <div class="stat-box gold"><div class="stat-label">Sièges titulaires</div><div class="stat-val">${data.nbTit}</div></div>
+      <div class="stat-box gold"><div class="stat-label">Sièges suppléants</div><div class="stat-val">${data.nbTit}</div></div>
+      <div class="stat-box green"><div class="stat-label">Collèges présents</div><div class="stat-val">${Object.keys(data.detail).length}</div></div>
+    </div>
+    <p style="margin-top:14px; font-size:13px; color:var(--gris);">Sièges calculés au prorata des effectifs (méthode du plus grand reste), à valider/adapter selon le PAP. La règle <strong>R. 2314-1</strong> donne le total ; la répartition par collège est négociée au Protocole d'Accord Préélectoral.</p>
+  `;
+  document.getElementById('zone-construction').style.display = 'block';
+  // Listes
+  const conteneur = document.getElementById('listes-conteneur');
+  conteneur.innerHTML = '';
+  const colleges = Object.keys(data.detail);
+  ['titulaires', 'suppleants'].forEach(type => {
+    const wrap = document.createElement('div');
+    wrap.className = 'liste-section';
+    wrap.innerHTML = `<h3>${type === 'titulaires' ? '🏛️ Liste TITULAIRES' : '👥 Liste SUPPLÉANTS'}</h3>`;
+    colleges.forEach(c => {
+      const comp = data.composition[c];
+      const slots = genererSlots(comp.candF, comp.candH);
+      const collegeKey = c.replace(/[^a-zA-Z]/g, '_');
+      if (!state.candidats[type][c]) state.candidats[type][c] = new Array(slots.length).fill('');
+      let html = `<div style="margin-top:18px;">
+        <h4 style="font-size:16px; color:var(--texte); font-family:'Fraunces',serif; margin-bottom:6px;">Collège ${c}</h4>
+        <p style="font-size:13px; color:var(--gris); margin-bottom:8px;">
+          ${comp.inscrits} inscrits (${comp.nbF} F / ${comp.nbH} H) — proportion ${(comp.propF*100).toFixed(1)}% F / ${(comp.propH*100).toFixed(1)}% H<br>
+          → Composition légale L. 2314-30 : <strong>${comp.candF} F + ${comp.candH} H = ${comp.sieges} sièges</strong>
+          ${comp.alerte ? `<br><em style="color:var(--orange);">⚠ ${comp.alerte}</em>` : ''}
+          ${comp.canAddMinority ? `<br><em style="color:var(--orange);">⚠ Sexe ${comp.canAddMinority} non représenté : vous pouvez ajouter 1 candidat ${comp.canAddMinority}, mais jamais en position 1.</em>` : ''}
+        </p>
+        <div class="slots-grid" data-college="${c}" data-type="${type}">`;
+      slots.forEach((sexe, i) => {
+        const val = state.candidats[type][c][i] || '';
+        html += `<div class="slot slot-${sexe}">
+          <span class="slot-pos">${i+1}</span>
+          <span class="slot-sexe">${sexe === 'F' ? 'Femme' : 'Homme'}</span>
+          <input type="text" placeholder="Initiales ou pseudo (ex: M.D.)" value="${val.replace(/"/g, '&quot;')}" data-type="${type}" data-college="${c}" data-idx="${i}" maxlength="40">
+          <span class="slot-status" id="status-${type}-${collegeKey}-${i}"></span>
+        </div>`;
+      });
+      html += `</div></div>`;
+      wrap.innerHTML += html;
+    });
+    conteneur.appendChild(wrap);
+  });
+  // Brancher la saisie
+  conteneur.querySelectorAll('input').forEach(inp => {
+    inp.addEventListener('input', (e) => {
+      const { type, college, idx } = e.target.dataset;
+      state.candidats[type][college][parseInt(idx)] = e.target.value;
+      updateConformite();
+    });
+  });
+  updateConformite();
+}
+
+function updateConformite() {
+  if (!state.selectedUM) return;
+  const data = calculsUM(state.selectedUM);
+  const colleges = Object.keys(data.detail);
+  let tousOK = true, totalSlots = 0, totalRemplis = 0;
+  colleges.forEach(c => {
+    ['titulaires', 'suppleants'].forEach(type => {
+      const comp = data.composition[c];
+      const slots = genererSlots(comp.candF, comp.candH);
+      const collegeKey = c.replace(/[^a-zA-Z]/g, '_');
+      slots.forEach((s, i) => {
+        const el = document.getElementById(`status-${type}-${collegeKey}-${i}`);
+        totalSlots++;
+        const val = (state.candidats[type][c] && state.candidats[type][c][i]) || '';
+        if (val.trim()) {
+          totalRemplis++;
+          if (el) { el.textContent = '✓'; el.style.color = 'var(--vert)'; }
+        } else {
+          tousOK = false;
+          if (el) { el.textContent = '○'; el.style.color = 'var(--gris)'; }
+        }
+      });
+    });
+  });
+  // Indicateurs globaux
+  const gc = document.getElementById('conformite-globale');
+  const indicateurs = [
+    { ok: true, label: 'Proportion F/H respectée (L. 2314-30)' },
+    { ok: true, label: 'Alternance F/H imposée par les slots' },
+    { ok: true, label: 'Premier candidat conforme (jamais sexe non représenté)' },
+    { ok: totalRemplis > 0, label: `${totalRemplis} / ${totalSlots} candidats saisis` },
+    { ok: totalRemplis === totalSlots, label: totalRemplis === totalSlots ? 'Listes complètes' : `Liste incomplète (${totalSlots - totalRemplis} slots vides — autorisé mais signalé)` }
+  ];
+  gc.innerHTML = indicateurs.map(ind => {
+    const cls = ind.ok ? 'ok' : (ind.label.includes('Liste incomplète') ? 'warn' : 'err');
+    const icon = ind.ok ? '✓' : (cls === 'warn' ? '⚠' : '✗');
+    return `<div class="conf-item ${cls}"><span class="conf-icon">${icon}</span><span>${ind.label}</span></div>`;
+  }).join('');
+}
+
+/* ═══════════════════════════════════════════════════
+   SIMULATEUR VOIX (R. 2314-19)
+   ═══════════════════════════════════════════════════ */
+function renderSimulateur() {
+  if (!state.selectedUM) return;
+  const data = calculsUM(state.selectedUM);
+  const conteneur = document.getElementById('simu-content');
+  let html = `<h3>Établissement : ${state.selectedUM}</h3>`;
+  Object.keys(data.detail).forEach(c => {
+    const det = data.detail[c];
+    const sieges = data.sieges[c];
+    const quorum = Math.ceil(det.effectif / 2);
+    html += `<div style="margin-bottom:28px;">
+      <h4 style="font-family:'Fraunces',serif; font-size:18px; color:var(--bleu); margin-bottom:8px;">Collège ${c}</h4>
+      <p style="font-size:14px; color:var(--gris); margin-bottom:14px;">${det.effectif} inscrits · ${sieges} sièges · quorum 1<sup>er</sup> tour = <strong>${quorum} votants minimum</strong></p>
+      <table>
+        <thead><tr><th>Participation</th><th>Votants</th><th>Quotient électoral</th><th>Voix pour 1 élu</th><th>Voix pour 2 élus</th><th>Voix pour 3 élus</th></tr></thead>
+        <tbody>`;
+    [50, 60, 70, 80, 90, 100].forEach(pct => {
+      const votants = Math.floor(det.effectif * pct / 100);
+      const quotient = votants / sieges;
+      const v1 = Math.ceil(quotient);
+      const v2 = Math.ceil(quotient * 2);
+      const v3 = sieges >= 3 ? Math.ceil(quotient * 3) : '—';
+      html += `<tr>
+        <td><strong>${pct} %</strong></td>
+        <td>${votants}</td>
+        <td>${quotient.toFixed(1)}</td>
+        <td><strong style="color:var(--bleu);">${v1}</strong></td>
+        <td><strong style="color:var(--bleu);">${v2}</strong></td>
+        <td><strong style="color:var(--bleu);">${v3}</strong></td>
+      </tr>`;
+    });
+    html += `</tbody></table></div>`;
+  });
+  html += `<div class="alert alert-info"><span class="alert-icon">📐</span><div><strong>Méthode :</strong> quotient électoral = nombre de votants ÷ nombre de sièges. Pour obtenir N élus, la liste FO doit recueillir au minimum N × quotient voix. Les sièges restants sont attribués à la plus forte moyenne (R. 2314-20) : <code>voix liste ÷ (sièges déjà obtenus + 1)</code>.</div></div>`;
+  conteneur.innerHTML = html;
+}
+
+/* ═══════════════════════════════════════════════════
+   EXPORT EXCEL
+   ═══════════════════════════════════════════════════ */
+document.getElementById('btn-export-xlsx').addEventListener('click', () => {
+  if (!state.selectedUM) return;
+  const data = calculsUM(state.selectedUM);
+  const wb = XLSX.utils.book_new();
+  // Feuille synthèse
+  const synth = [
+    ['Outil FO GRDF — Liste électorale CSE 2027'],
+    [`Établissement : ${state.selectedUM}`],
+    [`Date d'export : ${new Date().toLocaleDateString('fr-FR')}`],
+    [],
+    ['Effectif total', data.effectif],
+    ['Sièges titulaires (R. 2314-1)', data.nbTit],
+    ['Sièges suppléants', data.nbTit],
+    [],
+    ['Collège', 'Effectif', 'F', 'H', 'Sièges', 'Candidats F (L.2314-30)', 'Candidats H (L.2314-30)']
+  ];
+  Object.keys(data.detail).forEach(c => {
+    const d = data.detail[c], comp = data.composition[c];
+    synth.push([c, d.effectif, d.nbF, d.nbH, data.sieges[c], comp.candF, comp.candH]);
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(synth), 'Synthèse');
+  // Une feuille par type x collège
+  ['titulaires', 'suppleants'].forEach(type => {
+    Object.keys(data.detail).forEach(c => {
+      const comp = data.composition[c];
+      const slots = genererSlots(comp.candF, comp.candH);
+      const rows = [['Position', 'Sexe imposé', 'Candidat (initiales/pseudo)']];
+      slots.forEach((s, i) => {
+        const val = (state.candidats[type][c] && state.candidats[type][c][i]) || '';
+        rows.push([i+1, s === 'F' ? 'Femme' : 'Homme', val]);
+      });
+      const sheetName = `${type === 'titulaires' ? 'Tit' : 'Sup'} ${c}`.substring(0, 31);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), sheetName);
+    });
+  });
+  XLSX.writeFile(wb, `Liste_CSE_${state.selectedUM.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
+});
+
+/* ═══════════════════════════════════════════════════
+   EXPORT PDF
+   ═══════════════════════════════════════════════════ */
+document.getElementById('btn-export-pdf').addEventListener('click', () => {
+  if (!state.selectedUM) return;
+  const data = calculsUM(state.selectedUM);
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  // Header
+  doc.setFillColor(1, 156, 218);
+  doc.rect(0, 0, 210, 30, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.text('FO GRDF — Liste électorale CSE 2027', 14, 14);
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Établissement : ${state.selectedUM}`, 14, 22);
+  doc.setTextColor(30, 30, 30);
+  doc.setFontSize(10);
+  doc.text(`Date : ${new Date().toLocaleDateString('fr-FR')}`, 14, 38);
+  doc.text(`Effectif total : ${data.effectif} salariés — Sièges titulaires : ${data.nbTit} — Sièges suppléants : ${data.nbTit}`, 14, 44);
+  // Synthèse
+  const synthRows = Object.keys(data.detail).map(c => {
+    const d = data.detail[c], comp = data.composition[c];
+    return [c, d.effectif, d.nbF, d.nbH, data.sieges[c], `${comp.candF} F + ${comp.candH} H`];
+  });
+  doc.autoTable({
+    startY: 50,
+    head: [['Collège', 'Effectif', 'F', 'H', 'Sièges', 'Composition légale']],
+    body: synthRows,
+    theme: 'grid',
+    headStyles: { fillColor: [1, 156, 218] }
+  });
+  // Listes
+  let y = doc.lastAutoTable.finalY + 10;
+  ['titulaires', 'suppleants'].forEach(type => {
+    doc.addPage();
+    doc.setFillColor(1, 156, 218);
+    doc.rect(0, 0, 210, 16, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Liste ${type.toUpperCase()}`, 14, 11);
+    doc.setTextColor(30, 30, 30);
+    let yy = 26;
+    Object.keys(data.detail).forEach(c => {
+      const comp = data.composition[c];
+      const slots = genererSlots(comp.candF, comp.candH);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.text(`Collège ${c} (${comp.candF} F + ${comp.candH} H)`, 14, yy);
+      yy += 4;
+      const rows = slots.map((s, i) => [i+1, s === 'F' ? 'Femme' : 'Homme', (state.candidats[type][c] && state.candidats[type][c][i]) || '________________']);
+      doc.autoTable({
+        startY: yy,
+        head: [['#', 'Sexe imposé', 'Candidat']],
+        body: rows,
+        theme: 'striped',
+        headStyles: { fillColor: [247, 221, 92], textColor: [1, 156, 218] },
+        margin: { left: 14, right: 14 }
+      });
+      yy = doc.lastAutoTable.finalY + 8;
+      if (yy > 250) { doc.addPage(); yy = 20; }
+    });
+  });
+  // Footer juridique
+  doc.addPage();
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.text('Cadre légal appliqué', 14, 20);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  const legal = [
+    'Cette liste a été construite selon les règles suivantes du Code du travail :',
+    '',
+    '• R. 2314-1 — Nombre de sièges titulaires en fonction de l\'effectif de l\'établissement.',
+    '• L. 2314-30 — Représentation équilibrée femmes / hommes : proportion d\'inscrits par collège,',
+    '  alternance F/H jusqu\'à épuisement du sexe minoritaire, arrondi arithmétique.',
+    '• L. 2314-32 — Sanction en cas de non-respect : annulation des élus du sexe surreprésenté.',
+    '• R. 2314-19 — Quotient électoral pour l\'attribution des sièges.',
+    '• L. 2314-29 — Scrutin proportionnel à deux tours, quorum 50 % au 1er tour.',
+    '',
+    'Document généré par l\'outil FO GRDF (https://FO-GRDF.github.io/fo-cse-listes-2027/).',
+    'Contact : syndicat-fo_grdf-delegations-nationales@grdf.fr'
+  ];
+  let yL = 28;
+  legal.forEach(l => { doc.text(l, 14, yL); yL += 6; });
+  doc.save(`Liste_CSE_${state.selectedUM.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0,10)}.pdf`);
+});
+
+/* ═══════════════════════════════════════════════════
+   RESET
+   ═══════════════════════════════════════════════════ */
+document.getElementById('btn-reset').addEventListener('click', () => {
+  if (confirm('Réinitialiser toutes les saisies de candidats ?')) {
+    state.candidats = { titulaires: {}, suppleants: {} };
+    renderConstructeur();
+  }
+});
+</script>
+
+</body>
+</html>
