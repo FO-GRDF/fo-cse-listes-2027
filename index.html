@@ -983,16 +983,22 @@ function compositionListe(nbF, nbH, nbSieges) {
 }
 
 // ─── L. 2314-30 : alternance F/H imposée ──────────────────────
-function genererSlots(candF, candH) {
-  // Sexe majoritaire en tête, alternance jusqu'à épuisement du minoritaire
-  let majoritaire, minoritaire, nbMaj, nbMin;
-  if (candF >= candH) { majoritaire = 'F'; minoritaire = 'H'; nbMaj = candF; nbMin = candH; }
-  else { majoritaire = 'H'; minoritaire = 'F'; nbMaj = candH; nbMin = candF; }
+function genererSlots(candF, candH, forcedFirst) {
+  // forcedFirst: 'F', 'H' ou null/undefined (auto = sexe majoritaire en premier)
+  // L. 2314-30 impose l'alternance et l'épuisement du sexe minoritaire,
+  // mais ne précise pas qui commence — c'est un choix libre du syndicat.
+  let premier;
+  if (forcedFirst === 'F' && candF > 0) premier = 'F';
+  else if (forcedFirst === 'H' && candH > 0) premier = 'H';
+  else premier = (candF >= candH) ? 'F' : 'H';  // auto = majoritaire en tête
+  const autre = premier === 'F' ? 'H' : 'F';
+  const nbPremier = premier === 'F' ? candF : candH;
+  const nbAutre   = premier === 'F' ? candH : candF;
   const slots = [];
   let i = 0, j = 0;
-  while (i < nbMaj || j < nbMin) {
-    if (i < nbMaj) { slots.push(majoritaire); i++; }
-    if (j < nbMin) { slots.push(minoritaire); j++; }
+  while (i < nbPremier || j < nbAutre) {
+    if (i < nbPremier) { slots.push(premier); i++; }
+    if (j < nbAutre)   { slots.push(autre);   j++; }
   }
   return slots;
 }
@@ -1005,7 +1011,8 @@ const state = {
   ignored: 0,         // lignes ignorées (#N/A, vides)
   ums: [],            // liste UM disponibles
   selectedUM: null,
-  candidats: {}       // { titulaires: { collège: [initiales par slot] }, suppleants: idem }
+  candidats: {},      // { titulaires: { collège: [initiales par slot] }, suppleants: idem }
+  premierSexe: { titulaires: {}, suppleants: {} }  // { type: { collège: 'F' | 'H' | null (auto) } }
 };
 
 /* ═══════════════════════════════════════════════════
@@ -1239,9 +1246,13 @@ function renderConstructeur() {
     wrap.innerHTML = `<h3>${type === 'titulaires' ? '🏛️ Liste TITULAIRES' : '👥 Liste SUPPLÉANTS'}</h3>`;
     colleges.forEach(c => {
       const comp = data.composition[c];
-      const slots = genererSlots(comp.candF, comp.candH);
+      const premChoice = state.premierSexe[type][c] || 'auto';
+      const forcedFirst = (premChoice === 'F' || premChoice === 'H') ? premChoice : null;
+      const slots = genererSlots(comp.candF, comp.candH, forcedFirst);
       const collegeKey = c.replace(/[^a-zA-Z]/g, '_');
       if (!state.candidats[type][c]) state.candidats[type][c] = new Array(slots.length).fill('');
+      // Auto-déterminé par défaut
+      const autoFirst = (comp.candF >= comp.candH) ? 'F' : 'H';
       let html = `<div style="margin-top:18px;">
         <h4 style="font-size:16px; color:var(--texte); font-family:'Fraunces',serif; margin-bottom:6px;">Collège ${c}</h4>
         <p style="font-size:13px; color:var(--gris); margin-bottom:8px;">
@@ -1250,6 +1261,12 @@ function renderConstructeur() {
           ${comp.alerte ? `<br><em style="color:var(--orange);">⚠ ${comp.alerte}</em>` : ''}
           ${comp.canAddMinority ? `<br><em style="color:var(--orange);">⚠ Sexe ${comp.canAddMinority} non représenté : vous pouvez ajouter 1 candidat ${comp.canAddMinority}, mais jamais en position 1.</em>` : ''}
         </p>
+        <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin:8px 0 12px; padding:10px 14px; background:white; border:1.5px solid var(--gris-clair); border-radius:8px; font-size:13px;">
+          <strong style="color:var(--bleu);">Premier candidat :</strong>
+          <label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="radio" name="prem-${type}-${collegeKey}" value="auto" data-type="${type}" data-college="${c}" ${premChoice==='auto'?'checked':''}> Auto (${autoFirst==='F'?'Femme':'Homme'} — sexe majoritaire)</label>
+          <label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="radio" name="prem-${type}-${collegeKey}" value="F" data-type="${type}" data-college="${c}" ${premChoice==='F'?'checked':''} ${comp.candF===0?'disabled':''}> Femme</label>
+          <label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="radio" name="prem-${type}-${collegeKey}" value="H" data-type="${type}" data-college="${c}" ${premChoice==='H'?'checked':''} ${comp.candH===0?'disabled':''}> Homme</label>
+        </div>
         <div class="slots-grid" data-college="${c}" data-type="${type}">`;
       slots.forEach((sexe, i) => {
         const val = state.candidats[type][c][i] || '';
@@ -1265,12 +1282,25 @@ function renderConstructeur() {
     });
     conteneur.appendChild(wrap);
   });
-  // Brancher la saisie
-  conteneur.querySelectorAll('input').forEach(inp => {
+  // Brancher la saisie texte des candidats
+  conteneur.querySelectorAll('input[type=text]').forEach(inp => {
     inp.addEventListener('input', (e) => {
       const { type, college, idx } = e.target.dataset;
       state.candidats[type][college][parseInt(idx)] = e.target.value;
       updateConformite();
+      renderSimulateur();  // mettre à jour le simulateur avec les noms
+    });
+  });
+  // Brancher les radios "Premier candidat"
+  conteneur.querySelectorAll('input[type=radio]').forEach(rd => {
+    rd.addEventListener('change', (e) => {
+      const { type, college } = e.target.dataset;
+      const newChoice = e.target.value;
+      state.premierSexe[type][college] = (newChoice === 'auto') ? null : newChoice;
+      // Réinitialiser les noms du collège concerné (les positions changent)
+      state.candidats[type][college] = null;
+      renderConstructeur();
+      renderSimulateur();
     });
   });
   updateConformite();
@@ -1284,7 +1314,9 @@ function updateConformite() {
   colleges.forEach(c => {
     ['titulaires', 'suppleants'].forEach(type => {
       const comp = data.composition[c];
-      const slots = genererSlots(comp.candF, comp.candH);
+      const premChoice = state.premierSexe[type][c] || 'auto';
+      const forcedFirst = (premChoice === 'F' || premChoice === 'H') ? premChoice : null;
+      const slots = genererSlots(comp.candF, comp.candH, forcedFirst);
       const collegeKey = c.replace(/[^a-zA-Z]/g, '_');
       slots.forEach((s, i) => {
         const el = document.getElementById(`status-${type}-${collegeKey}-${i}`);
@@ -1323,35 +1355,53 @@ function renderSimulateur() {
   if (!state.selectedUM) return;
   const data = calculsUM(state.selectedUM);
   const conteneur = document.getElementById('simu-content');
-  let html = `<h3>Établissement : ${state.selectedUM}</h3>`;
+  let html = `<h3>Établissement : ${state.selectedUM}</h3>
+    <p style="font-size:13px; color:var(--gris); margin-bottom:18px;">Les noms ci-dessous reprennent les candidats saisis dans le <strong>Constructeur</strong>. Les slots vides s'affichent comme "1<sup>er</sup> élu", "2<sup>e</sup> élu"… Saisissez vos candidats dans l'onglet précédent pour personnaliser ce tableau.</p>`;
   Object.keys(data.detail).forEach(c => {
     const det = data.detail[c];
     const sieges = data.sieges[c];
     const quorum = Math.ceil(det.effectif / 2);
-    html += `<div style="margin-bottom:28px;">
+    const comp = data.composition[c];
+    // Récupérer les noms saisis pour les TITULAIRES (le simulateur traite des élus titulaires)
+    const premChoice = state.premierSexe.titulaires[c] || 'auto';
+    const forcedFirst = (premChoice === 'F' || premChoice === 'H') ? premChoice : null;
+    const slots = genererSlots(comp.candF, comp.candH, forcedFirst);
+    const noms = (state.candidats.titulaires && state.candidats.titulaires[c]) || [];
+    // Étiquette de chaque position : nom saisi ou "Nème élu"
+    const labelPos = (i) => {
+      const nom = (noms[i] || '').trim();
+      const sexe = slots[i] || '?';
+      const ordinal = i === 0 ? '1ᵉʳ' : `${i+1}ᵉ`;
+      if (nom) return `<span style="color:${sexe==='F'?'#be185d':'#1e40af'};font-weight:600;">${nom}</span> <span style="font-size:11px;opacity:0.6;">(${sexe})</span>`;
+      return `<span style="opacity:0.6;font-style:italic;">${ordinal} élu (${sexe})</span>`;
+    };
+    // Construire les en-têtes dynamiques selon le nombre de sièges (jusqu'à 5 pour lisibilité)
+    const maxAffiche = Math.min(sieges, 5);
+    let headers = `<th>Participation</th><th>Votants</th><th>Quotient</th>`;
+    for (let n = 1; n <= maxAffiche; n++) {
+      headers += `<th style="min-width:120px;">${n} élu${n>1?'s':''}<br><small style="font-weight:400;">${labelPos(n-1)}</small></th>`;
+    }
+    html += `<div style="margin-bottom:36px;">
       <h4 style="font-family:'Fraunces',serif; font-size:18px; color:var(--bleu); margin-bottom:8px;">Collège ${c}</h4>
       <p style="font-size:14px; color:var(--gris); margin-bottom:14px;">${det.effectif} inscrits · ${sieges} sièges · quorum 1<sup>er</sup> tour = <strong>${quorum} votants minimum</strong></p>
+      <div class="table-wrap">
       <table>
-        <thead><tr><th>Participation</th><th>Votants</th><th>Quotient électoral</th><th>Voix pour 1 élu</th><th>Voix pour 2 élus</th><th>Voix pour 3 élus</th></tr></thead>
+        <thead><tr>${headers}</tr></thead>
         <tbody>`;
     [50, 60, 70, 80, 90, 100].forEach(pct => {
       const votants = Math.floor(det.effectif * pct / 100);
-      const quotient = votants / sieges;
-      const v1 = Math.ceil(quotient);
-      const v2 = Math.ceil(quotient * 2);
-      const v3 = sieges >= 3 ? Math.ceil(quotient * 3) : '—';
-      html += `<tr>
-        <td><strong>${pct} %</strong></td>
-        <td>${votants}</td>
-        <td>${quotient.toFixed(1)}</td>
-        <td><strong style="color:var(--bleu);">${v1}</strong></td>
-        <td><strong style="color:var(--bleu);">${v2}</strong></td>
-        <td><strong style="color:var(--bleu);">${v3}</strong></td>
-      </tr>`;
+      const quotient = sieges > 0 ? votants / sieges : 0;
+      let row = `<tr><td><strong>${pct} %</strong></td><td>${votants}</td><td>${quotient.toFixed(1)}</td>`;
+      for (let n = 1; n <= maxAffiche; n++) {
+        const voix = Math.ceil(quotient * n);
+        row += `<td style="text-align:center;"><strong style="color:var(--bleu);font-size:16px;">${voix}</strong><br><span style="font-size:11px;color:var(--gris);">voix FO</span></td>`;
+      }
+      row += `</tr>`;
+      html += row;
     });
-    html += `</tbody></table></div>`;
+    html += `</tbody></table></div></div>`;
   });
-  html += `<div class="alert alert-info"><span class="alert-icon">📐</span><div><strong>Méthode :</strong> quotient électoral = nombre de votants ÷ nombre de sièges. Pour obtenir N élus, la liste FO doit recueillir au minimum N × quotient voix. Les sièges restants sont attribués à la plus forte moyenne (R. 2314-20) : <code>voix liste ÷ (sièges déjà obtenus + 1)</code>.</div></div>`;
+  html += `<div class="alert alert-info"><span class="alert-icon">📐</span><div><strong>Comment lire ce tableau :</strong> chaque colonne "<em>N élus</em>" montre le nombre de voix que la liste FO doit recueillir pour faire élire les N premiers candidats de la liste (ceux affichés sous l'en-tête). Quotient électoral = nombre de votants ÷ nombre de sièges (R. 2314-19). Les sièges restants sont attribués à la plus forte moyenne (R. 2314-20).</div></div>`;
   conteneur.innerHTML = html;
 }
 
@@ -1383,7 +1433,9 @@ document.getElementById('btn-export-xlsx').addEventListener('click', () => {
   ['titulaires', 'suppleants'].forEach(type => {
     Object.keys(data.detail).forEach(c => {
       const comp = data.composition[c];
-      const slots = genererSlots(comp.candF, comp.candH);
+      const premChoice = state.premierSexe[type][c] || 'auto';
+      const forcedFirst = (premChoice === 'F' || premChoice === 'H') ? premChoice : null;
+      const slots = genererSlots(comp.candF, comp.candH, forcedFirst);
       const rows = [['Position', 'Sexe imposé', 'Candidat (initiales/pseudo)']];
       slots.forEach((s, i) => {
         const val = (state.candidats[type][c] && state.candidats[type][c][i]) || '';
@@ -1444,7 +1496,9 @@ document.getElementById('btn-export-pdf').addEventListener('click', () => {
     let yy = 26;
     Object.keys(data.detail).forEach(c => {
       const comp = data.composition[c];
-      const slots = genererSlots(comp.candF, comp.candH);
+      const premChoice = state.premierSexe[type][c] || 'auto';
+      const forcedFirst = (premChoice === 'F' || premChoice === 'H') ? premChoice : null;
+      const slots = genererSlots(comp.candF, comp.candH, forcedFirst);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(12);
       doc.text(`Collège ${c} (${comp.candF} F + ${comp.candH} H)`, 14, yy);
