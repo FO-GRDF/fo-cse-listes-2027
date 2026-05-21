@@ -1071,6 +1071,11 @@ function getPartic2023(c) {
 }
 const LIBELLE_OS = { FO:'FO', CFDT:'CFDT', CGT:'CGT', CFECGC:'CFE-CGC', Autres:'Autres / NS' };
 const COULEUR_OS = { FO:'#019cda', CFDT:'#ff6b00', CGT:'#cc0000', CFECGC:'#0066cc', Autres:'#6b7280' };
+// Règle : la CFE-CGC est catégorielle (cadres + AM). Elle ne se présente pas en collège Exécution.
+function osApplicables(college) {
+  if (college === 'Exécution') return ['FO','CFDT','CGT','Autres'];
+  return ['FO','CFDT','CGT','CFECGC','Autres'];
+}
 
 /* ═══════════════════════════════════════════════════
    NAVIGATION ONGLETS
@@ -1438,16 +1443,22 @@ function renderSimulateur() {
     const collegeKeyS = c.replace(/[^a-zA-Z]/g, '_');
     const p2023 = getPartic2023(c);
     const particVal = (p2023.particPct !== null && p2023.particPct !== undefined) ? p2023.particPct : '';
-    const sumVoix = Object.values(p2023.voix).reduce((a,b) => a + (parseFloat(b)||0), 0);
+    // Force CFE-CGC à 0 en Exécution (collège ouvrier, OS catégorielle non applicable)
+    const osList = osApplicables(c);
+    if (c === 'Exécution' && p2023.voix.CFECGC) p2023.voix.CFECGC = 0;
+    const sumVoix = osList.reduce((a, os) => a + (parseFloat(p2023.voix[os])||0), 0);
     const hasAnyVoix = sumVoix > 0;
-    // Formulaire 2023 : participation + voix par OS
-    const champsOS = Object.keys(LIBELLE_OS).map(os => {
+    // Formulaire 2023 : participation + voix par OS applicables au collège
+    const champsOS = osList.map(os => {
       const v = p2023.voix[os] || '';
       return `<div style="display:flex; flex-direction:column; gap:3px;">
         <label for="voix-${os}-${collegeKeyS}" style="font-size:11px; font-weight:700; color:${COULEUR_OS[os]}; text-transform:uppercase;">${LIBELLE_OS[os]}</label>
         <input type="number" id="voix-${os}-${collegeKeyS}" data-college="${c}" data-os="${os}" min="0" step="1" value="${v}" placeholder="0" class="inp-voix-os" style="width:90px; padding:5px 8px; border:1.5px solid var(--gris-clair); border-radius:5px; font-family:inherit; font-size:13px;">
       </div>`;
     }).join('');
+    const noteCfecgc = (c === 'Exécution')
+      ? `<div style="font-size:11px; color:var(--gris); margin-top:6px; font-style:italic;">ℹ️ CFE-CGC masquée : organisation catégorielle (cadres + agents de maîtrise), non présente en collège Exécution.</div>`
+      : '';
     html += `<div style="margin-bottom:36px;">
       <h4 style="font-family:'Fraunces',serif; font-size:18px; color:var(--bleu); margin-bottom:8px;">Collège ${c}</h4>
       <p style="font-size:14px; color:var(--gris); margin-bottom:10px;">${det.effectif} inscrits · ${sieges} sièges · quorum 1<sup>er</sup> tour = <strong>${quorum} votants minimum</strong></p>
@@ -1460,6 +1471,7 @@ function renderSimulateur() {
         </div>
         <div style="font-size:12px; color:var(--gris); margin-bottom:8px; font-weight:600;">🗳️ Voix obtenues par organisation au 1<sup>er</sup> tour 2023 (laissez 0 si non présente) :</div>
         <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">${champsOS}</div>
+        ${noteCfecgc}
       </div>
       <div class="table-wrap">
       <table>
@@ -1497,15 +1509,18 @@ function renderSimulateur() {
 
     // ─── Projection 2023 multi-OS (plus forte moyenne) ───
     if (hasAnyVoix) {
-      const rep2023 = plusForteMoyenne(p2023.voix, sieges);
-      const totalVoix = sumVoix;
+      // Restreindre aux OS applicables au collège (la CFE-CGC est exclue en Exécution)
+      const voixApp = {};
+      osList.forEach(os => { voixApp[os] = p2023.voix[os] || 0; });
+      const rep2023 = plusForteMoyenne(voixApp, sieges);
+      const totalVoix = Object.values(voixApp).reduce((a,b) => a + b, 0);
       // Détail tableau
       let tabRep = `<table style="margin-top:6px;"><thead><tr>
         <th>Organisation</th><th style="text-align:right;">Voix 2023</th><th style="text-align:right;">Part</th><th style="text-align:right;">Sièges</th>
       </tr></thead><tbody>`;
-      Object.keys(LIBELLE_OS).forEach(os => {
-        const v = p2023.voix[os] || 0;
-        if (v === 0 && rep2023[os] === 0) return;
+      osList.forEach(os => {
+        const v = voixApp[os] || 0;
+        if (v === 0 && (rep2023[os]||0) === 0) return;
         const pct = totalVoix > 0 ? (v/totalVoix*100).toFixed(1) : '0';
         const sg = rep2023[os] || 0;
         const isFO = (os === 'FO');
@@ -1519,12 +1534,12 @@ function renderSimulateur() {
       tabRep += `</tbody></table>`;
 
       // Voix-pivot : combien de voix FO pour décrocher N sièges, autres OS constants
-      const voixAutres = { ...p2023.voix };
-      delete voixAutres.FO;
+      const voixAutres = {};
+      osList.filter(o => o !== 'FO').forEach(os => { voixAutres[os] = voixApp[os] || 0; });
       let tabPivot = `<table style="margin-top:6px;"><thead><tr>
         <th>Objectif FO</th><th style="text-align:right;">Voix FO nécessaires</th><th style="text-align:right;">Écart vs 2023</th><th>Faisabilité</th>
       </tr></thead><tbody>`;
-      const voixFO2023 = p2023.voix.FO || 0;
+      const voixFO2023 = voixApp.FO || 0;
       for (let n = 1; n <= sieges; n++) {
         const seuil = voixFOPourNSieges(voixAutres, sieges, n);
         if (seuil === null) continue;
