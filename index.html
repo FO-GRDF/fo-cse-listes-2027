@@ -1128,21 +1128,51 @@ function nbTitulairesFromEff(eff) {
 }
 
 function parseCerfaBlock(text) {
-  // Détection collège + type via le footer "GRDF - ... - <Collège> - <Type>"
-  const mc = text.match(/[-–]\s*(Ex[ée]cution|Ma[îi]trise|Cadre)\s*[-–]\s*(Titulaires|Suppl[ée]ants)/i);
+  // Détection collège + type via le footer "GRDF - ... - <Collège> - <Type>" (tirets variables : -, –, —)
+  const mc = text.match(/[-–—]\s*(Ex[ée]cution|Ma[îi]trise|Cadre)\s*[-–—]\s*(Titulaires|Suppl[ée]ants)/i);
   if (!mc) return null;
   const college = /cuti/i.test(mc[1]) ? 'Exécution' : (/tris/i.test(mc[1]) ? 'Maîtrise' : 'Cadre');
   const type = /uppl/i.test(mc[2]) ? 'suppleants' : 'titulaires';
 
-  // Voix par OS : pattern ligne candidat "OS_LABEL n1 n2 T n3" — T = 3e nombre = total voix de la liste
-  // OS détecté : FO, CFDT, CGT, CFE-CGC (avec ou sans ", UNSA"), UNSA seule, FSU, SUD, Solidaires
+  // Voix par OS : on parse ligne par ligne. Pour chaque ligne candidat (≥5 nombres), on cherche
+  // la DERNIÈRE OS avant les nombres. Si rien trouvé, on remonte tant qu'on ne croise pas une
+  // autre ligne candidat (cas Maîtrise où le label "Alliance CFE-CGC/UNSA" est sur les lignes
+  // précédentes à cause du retour-à-la-ligne dans la cellule). V (5e nombre) = T/N = voix moyenne
+  // par candidat de la liste — c'est V qui alimente la plus forte moyenne (R. 2314-19/20), pas T.
   const voixBrutes = {};
-  const reOS = /\b(FO|CFDT|CGT|CFE[-\s]?CGC(?:[, \s]+UNSA)?|UNSA(?![, \s]*UNSA)|FSU|SUD|Solidaires|UNAPL)\b[\s ,]+\d+[\s ]+\d+[\s ]+(\d+)[\s ]+\d+/gi;
-  let m;
-  while ((m = reOS.exec(text)) !== null) {
-    const lab = m[1].replace(/\s+/g, ' ').replace(/CFE\s*CGC/i, 'CFE-CGC').trim().toUpperCase();
-    const t = parseInt(m[2], 10);
-    if (!voixBrutes[lab] || t > voixBrutes[lab]) voixBrutes[lab] = t;
+  const osPatLine = /\b(CFE[-\s]*CGC[\/,\s]+UNSA|CFE[-\s]*CGC|UNSA|CFDT|CGT|FO|FSU|SUD|Solidaires|UNAPL)\b/gi;
+  const isCandidLine = (ln) => {
+    const nn = ln.match(/-?\d+(?:[,.]\d+)?/g);
+    return nn && nn.length >= 5;
+  };
+  const lastOSIn = (s) => {
+    let r = null, mo; osPatLine.lastIndex = 0;
+    while ((mo = osPatLine.exec(s)) !== null) r = mo[1];
+    return r;
+  };
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const nums = line.match(/-?\d+(?:[,.]\d+)?/g);
+    if (!nums || nums.length < 5) continue;
+    const firstNum = line.search(/-?\d/);
+    const before = line.substring(0, firstNum);
+    let lastOS = lastOSIn(before);
+    // Fallback : remonter dans les 3 lignes précédentes tant qu'on ne croise pas un autre candidat
+    if (!lastOS) {
+      for (let k = i - 1; k >= Math.max(0, i - 3); k--) {
+        if (isCandidLine(lines[k])) break;
+        const found = lastOSIn(lines[k]);
+        if (found) { lastOS = found; break; }
+      }
+    }
+    if (!lastOS) continue;
+    const v = parseFloat(nums[4].replace(',', '.'));
+    if (isNaN(v) || v <= 0) continue;
+    // Normalisation : "CFE-CGC/UNSA" et "CFE-CGC, UNSA" → "CFE-CGC UNSA" (même liste)
+    const lab = lastOS.replace(/CFE\s*[-\s]*CGC/i, 'CFE-CGC').replace(/[\/,]+/g, ' ').replace(/\s+/g, ' ').toUpperCase().trim();
+    const vRound = Math.round(v);
+    if (!voixBrutes[lab] || vRound > voixBrutes[lab]) voixBrutes[lab] = vRound;
   }
 
   // Clés d'entente (section V) : "Alliance ... <OS1> <OS1> XX.YY%" et "Alliance ... <OS2> <OS2> XX.YY%"
@@ -1187,21 +1217,23 @@ function parseCerfaBlock(text) {
   const C = (B != null && D != null) ? (B - D) : null;
   const participation = (A && B) ? Math.round((B / A) * 1000) / 10 : null;
 
-  // Distribution des voix vers nos 5 buckets, en appliquant les clés d'entente
+  // Distribution des voix vers nos 5 buckets, en appliquant les clés d'entente (R. 2122-2)
   const voixFinal = { FO:0, CFDT:0, CGT:0, CFECGC:0, Autres:0 };
-  Object.entries(voixBrutes).forEach(([label, t]) => {
+  Object.entries(voixBrutes).forEach(([label, v]) => {
     const labClean = label.replace(/\s+/g, ' ').trim();
-    // Détecter si entente (label contient au moins deux OS séparés)
-    const compos = labClean.split(/[\s ]+/).filter(x => /^(FO|CFDT|CGT|CFE-CGC|UNSA|FSU|SUD|Solidaires)$/i.test(x));
-    if (compos.length >= 2 && Object.keys(ententes).length > 0) {
-      // Répartition selon clés
+    // Split par espaces uniquement (les virgules/slashes ont déjà été normalisés en espaces)
+    const compos = labClean.split(/\s+/).filter(x => /^(FO|CFDT|CGT|CFE-CGC|UNSA|FSU|SUD|Solidaires|UNAPL)$/i.test(x));
+    if (compos.length >= 2) {
+      // Répartition selon clés d'entente CERFA (section V) — défaut 50/50 si clés absentes
       compos.forEach(c => {
         const k = c.toUpperCase();
         const pct = ententes[k] !== undefined ? ententes[k] : (1 / compos.length);
-        voixFinal[mapOSCerfa(k)] += Math.round(t * pct);
+        voixFinal[mapOSCerfa(k)] += Math.round(v * pct);
       });
+    } else if (compos.length === 1) {
+      voixFinal[mapOSCerfa(compos[0])] += v;
     } else {
-      voixFinal[mapOSCerfa(labClean)] += t;
+      voixFinal[mapOSCerfa(labClean)] += v;
     }
   });
 
