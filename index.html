@@ -19,6 +19,8 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.1/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>if(window.pdfjsLib){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}</script>
 
 <style>
 /* ═══════════════════════════════════════════════════
@@ -800,6 +802,24 @@ body.a11y-mode .slot .slot-sexe { background: var(--a11y-texte); color: var(--a1
       <div><strong>Quorum 1<sup>er</sup> tour (L. 2314-29) :</strong> si les votants sont moins de la moitié des inscrits, il est procédé à un 2<sup>e</sup> tour dans les 15 jours, ouvert aux listes non-syndicales.</div>
     </div>
 
+    <!-- Import CERFA 2023 (facultatif) -->
+    <div id="cerfa-import-zone" style="margin:18px 0; padding:18px; border:2px dashed var(--bleu); border-radius:10px; background:#f0f9ff;">
+      <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:280px;">
+          <h3 style="margin:0 0 6px; color:var(--bleu); font-family:'Fraunces',serif; font-size:18px;">📄 Importer les CERFA 2023 (facultatif)</h3>
+          <p style="margin:0 0 4px; font-size:13px; color:var(--gris);">Glissez vos PV CSE 2023 (1 à 6 PDF en une fois — Titulaires/Suppléants, Exécution/Maîtrise/Cadre). L'outil pré-remplit automatiquement les voix par OS de chaque collège.</p>
+          <p style="margin:0; font-size:11px; color:var(--vert); font-weight:600;">🔒 RGPD : aucun nom de candidat n'est extrait ni envoyé sur Internet. Seuls les chiffres agrégés (effectifs, voix, sièges) sont lus, 100 % dans votre navigateur.</p>
+        </div>
+        <label class="btn" style="cursor:pointer; background:var(--bleu); color:#fff; padding:10px 18px; border-radius:8px; border:none; font-family:inherit; font-weight:600; white-space:nowrap;">
+          <input type="file" id="cerfa-input" accept="application/pdf" multiple style="display:none;">
+          📁 Choisir des PDF
+        </label>
+      </div>
+      <div id="cerfa-status" style="margin-top:10px; font-size:13px;"></div>
+    </div>
+    <!-- Boîte de dialogue de confirmation post-extraction -->
+    <div id="cerfa-preview" style="display:none; margin:18px 0; padding:18px; background:#fffbeb; border:1.5px solid var(--or); border-radius:10px;"></div>
+
     <div id="simu-content">
       <p style="text-align:center; padding:40px; color:var(--gris);">Importez un fichier et choisissez un établissement dans l'onglet "Constructeur" pour voir les simulations.</p>
     </div>
@@ -1043,6 +1063,177 @@ function voixFOPourNSieges(voixAutresOS, sieges, N) {
     else lo = mid + 1;
   }
   return lo;
+}
+
+/* ═══════════════════════════════════════════════════
+   IMPORT CERFA — parser PDF 100 % côté navigateur
+   RGPD : ne lit QUE les chiffres agrégés (effectifs, voix par OS, clés d'entente).
+   Les noms et prénoms des candidats ne sont JAMAIS extraits ni stockés.
+   ═══════════════════════════════════════════════════ */
+function mapOSCerfa(label) {
+  const l = String(label).toUpperCase().replace(/[,\s]+/g, ' ').trim();
+  if (l === 'FO' || /\bFORCE\s+OUVRI/.test(l)) return 'FO';
+  if (l.includes('CFDT')) return 'CFDT';
+  if (l === 'CGT' || (l.includes('CGT') && !l.includes('CFE'))) return 'CGT';
+  if (l.includes('CFE-CGC') || l.includes('CFECGC')) return 'CFECGC';
+  return 'Autres'; // UNSA, FSU, SUD, Solidaires, listes non syndicales, etc.
+}
+
+async function extractLinesFromPDF(file) {
+  // Charge le PDF, extrait pour chaque page les "items" texte avec leur position.
+  // Regroupe par Y arrondi pour reconstituer des lignes, trie par X dans chaque ligne.
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  const pagesText = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const tc = await page.getTextContent();
+    const byY = {};
+    tc.items.forEach(it => {
+      const y = Math.round(it.transform[5]);
+      (byY[y] = byY[y] || []).push({ x: it.transform[4], s: it.str });
+    });
+    const lines = Object.keys(byY).map(y => parseInt(y)).sort((a,b) => b - a) // pdf.js : y croissant = bas
+      .map(y => byY[y].sort((a,b) => a.x - b.x).map(o => o.s).join(' ').replace(/\s+/g,' ').trim())
+      .filter(l => l.length);
+    pagesText.push({ page: i, lines });
+  }
+  return pagesText;
+}
+
+// Détecte le footer "Document NNN - Exemplaire XXX" pour regrouper les pages d'un même CERFA.
+function groupCerfaPages(pagesText) {
+  const groups = {};
+  pagesText.forEach(({ lines }) => {
+    const full = lines.join('\n');
+    const m = full.match(/Document\s+(\d+)\s*[-–]\s*Exemplaire\s+(\w+)/i);
+    if (m) {
+      const key = `${m[1]}_${m[2]}`;
+      (groups[key] = groups[key] || []).push(full);
+    } else {
+      // Pas de footer Document : on suppose 1 PDF = 1 CERFA, on agrège sous une clé unique
+      const key = `single_${Object.keys(groups).length}`;
+      (groups[key] = groups[key] || []).push(full);
+    }
+  });
+  return groups;
+}
+
+// Table R. 2314-1 partielle pour estimer nb de sièges à partir de l'effectif
+const R2314_TIT = [[11,1],[25,2],[50,3],[75,4],[100,5],[125,6],[150,7],[175,8],[200,9],[250,11],[300,11],[400,12],[500,13],[600,14],[700,14],[750,15],[800,15],[900,16],[1000,17],[1250,17],[1500,18],[1750,19],[2000,20],[2250,21],[2500,22],[2750,23],[3000,24],[3250,25],[3500,25],[3750,26],[4000,26],[4250,27],[4500,27],[4750,28],[5000,29],[5500,29],[6000,31],[6500,31],[7000,32],[7500,32],[8000,32],[8500,33],[9000,33],[9500,34],[10000,35]];
+function nbTitulairesFromEff(eff) {
+  if (!eff || eff < 11) return 0;
+  for (const [seuil, nb] of R2314_TIT) if (eff <= seuil) return nb;
+  return 35;
+}
+
+function parseCerfaBlock(text) {
+  // Détection collège + type via le footer "GRDF - ... - <Collège> - <Type>"
+  const mc = text.match(/[-–]\s*(Ex[ée]cution|Ma[îi]trise|Cadre)\s*[-–]\s*(Titulaires|Suppl[ée]ants)/i);
+  if (!mc) return null;
+  const college = /cuti/i.test(mc[1]) ? 'Exécution' : (/tris/i.test(mc[1]) ? 'Maîtrise' : 'Cadre');
+  const type = /uppl/i.test(mc[2]) ? 'suppleants' : 'titulaires';
+
+  // Voix par OS : pattern ligne candidat "OS_LABEL n1 n2 T n3" — T = 3e nombre = total voix de la liste
+  // OS détecté : FO, CFDT, CGT, CFE-CGC (avec ou sans ", UNSA"), UNSA seule, FSU, SUD, Solidaires
+  const voixBrutes = {};
+  const reOS = /\b(FO|CFDT|CGT|CFE[-\s]?CGC(?:[, \s]+UNSA)?|UNSA(?![, \s]*UNSA)|FSU|SUD|Solidaires|UNAPL)\b[\s ,]+\d+[\s ]+\d+[\s ]+(\d+)[\s ]+\d+/gi;
+  let m;
+  while ((m = reOS.exec(text)) !== null) {
+    const lab = m[1].replace(/\s+/g, ' ').replace(/CFE\s*CGC/i, 'CFE-CGC').trim().toUpperCase();
+    const t = parseInt(m[2], 10);
+    if (!voixBrutes[lab] || t > voixBrutes[lab]) voixBrutes[lab] = t;
+  }
+
+  // Clés d'entente (section V) : "Alliance ... <OS1> <OS1> XX.YY%" et "Alliance ... <OS2> <OS2> XX.YY%"
+  const ententes = {};
+  const reEnt = /(FO|CFDT|CGT|CFE[-\s]?CGC|UNSA|FSU|SUD|Solidaires)\s+\1\s+(\d+[.,]\d+)\s*%/gi;
+  while ((m = reEnt.exec(text)) !== null) {
+    const k = m[1].toUpperCase().replace(/CFE\s*CGC/i, 'CFE-CGC');
+    ententes[k] = parseFloat(m[2].replace(',', '.')) / 100;
+  }
+
+  // Inscrits A : entier > 10 dont N/2 apparaît sous forme décimale "N/2,Y" dans le texte (quorum E = A/2)
+  const allInts = [...text.matchAll(/\b(\d{1,5})\b/g)].map(x => parseInt(x[1])).filter(n => n >= 11);
+  const allDecs = new Set();
+  [...text.matchAll(/\b(\d+)[.,](\d+)\b/g)].forEach(x => allDecs.add(parseFloat(`${x[1]}.${x[2]}`)));
+  let A = null;
+  const cands = [...new Set(allInts)].filter(n => allDecs.has(n / 2));
+  if (cands.length) A = Math.max(...cands);
+  const P = nbTitulairesFromEff(A);
+
+  // SVE D : entier tel que D/P ≈ quotient (un décimal X,YY présent), différent de A et des voix d'OS
+  const voixSet = new Set(Object.values(voixBrutes));
+  const qCands = new Set();
+  [...text.matchAll(/\b(\d+)[.,](\d{2})\b/g)].forEach(x => qCands.add(parseFloat(`${x[1]}.${x[2]}`)));
+  let D = null;
+  if (P > 0) {
+    for (const n of [...allInts].sort((a,b) => b - a)) {
+      if (n === A || voixSet.has(n)) continue;
+      for (const q of qCands) {
+        if (Math.abs(n / P - q) < 0.05) { D = n; break; }
+      }
+      if (D) break;
+    }
+  }
+
+  // Votants B : entier entre D et A, le plus proche de A
+  let B = null;
+  if (A && D) {
+    for (const n of [...allInts].sort((a,b) => b - a)) {
+      if (n < A && n > D && !voixSet.has(n)) { B = n; break; }
+    }
+  }
+  const C = (B != null && D != null) ? (B - D) : null;
+  const participation = (A && B) ? Math.round((B / A) * 1000) / 10 : null;
+
+  // Distribution des voix vers nos 5 buckets, en appliquant les clés d'entente
+  const voixFinal = { FO:0, CFDT:0, CGT:0, CFECGC:0, Autres:0 };
+  Object.entries(voixBrutes).forEach(([label, t]) => {
+    const labClean = label.replace(/\s+/g, ' ').trim();
+    // Détecter si entente (label contient au moins deux OS séparés)
+    const compos = labClean.split(/[\s ]+/).filter(x => /^(FO|CFDT|CGT|CFE-CGC|UNSA|FSU|SUD|Solidaires)$/i.test(x));
+    if (compos.length >= 2 && Object.keys(ententes).length > 0) {
+      // Répartition selon clés
+      compos.forEach(c => {
+        const k = c.toUpperCase();
+        const pct = ententes[k] !== undefined ? ententes[k] : (1 / compos.length);
+        voixFinal[mapOSCerfa(k)] += Math.round(t * pct);
+      });
+    } else {
+      voixFinal[mapOSCerfa(labClean)] += t;
+    }
+  });
+
+  return { college, type, inscrits: A, votants: B, blancs: C, sve: D, sieges: P, participation, voix: voixFinal, voixBrutes, ententes };
+}
+
+// Parse un ou plusieurs PDF et retourne un tableau de CERFA dédupliqués par (collège, type), Titulaires prioritaires.
+async function parseCerfaFiles(files) {
+  const results = [];
+  for (const f of files) {
+    try {
+      const pages = await extractLinesFromPDF(f);
+      const groups = groupCerfaPages(pages);
+      Object.values(groups).forEach(blockArr => {
+        const text = blockArr.join('\n');
+        const parsed = parseCerfaBlock(text);
+        if (parsed) results.push({ ...parsed, fichier: f.name });
+      });
+    } catch (e) {
+      results.push({ erreur: `${f.name} : ${e.message}` });
+    }
+  }
+  // Déduplication : pour chaque (collège, type) garder le 1er occurence
+  const seen = new Set();
+  const uniq = [];
+  for (const r of results) {
+    if (r.erreur) { uniq.push(r); continue; }
+    const k = `${r.college}_${r.type}`;
+    if (seen.has(k)) continue;
+    seen.add(k); uniq.push(r);
+  }
+  return uniq;
 }
 
 /* ═══════════════════════════════════════════════════
@@ -1608,6 +1799,111 @@ function renderSimulateur() {
       renderSimulateur();
     });
   });
+}
+
+/* ═══════════════════════════════════════════════════
+   IMPORT CERFA — branchement UI
+   ═══════════════════════════════════════════════════ */
+const cerfaInput = document.getElementById('cerfa-input');
+const cerfaStatus = document.getElementById('cerfa-status');
+const cerfaPreview = document.getElementById('cerfa-preview');
+
+cerfaInput.addEventListener('change', async (e) => {
+  const files = [...e.target.files].filter(f => f.type === 'application/pdf' || /\.pdf$/i.test(f.name));
+  if (!files.length) return;
+  if (!window.pdfjsLib) {
+    cerfaStatus.innerHTML = `<div class="alert alert-err"><span class="alert-icon">❌</span><div>Bibliothèque PDF non chargée. Rechargez la page.</div></div>`;
+    return;
+  }
+  cerfaStatus.innerHTML = `<em>Analyse de ${files.length} fichier${files.length>1?'s':''} en cours…</em>`;
+  try {
+    const results = await parseCerfaFiles(files);
+    cerfaStatus.innerHTML = '';
+    if (!results.length) {
+      cerfaPreview.style.display = 'block';
+      cerfaPreview.innerHTML = `<div style="color:var(--rouge); font-weight:600;">Aucun CERFA reconnaissable trouvé dans ces fichiers.</div>`;
+      return;
+    }
+    afficherPreviewCerfa(results);
+  } catch (err) {
+    cerfaStatus.innerHTML = `<div class="alert alert-err"><span class="alert-icon">❌</span><div>Erreur de lecture : ${err.message}</div></div>`;
+  }
+  e.target.value = ''; // permettre de re-sélectionner les mêmes fichiers
+});
+
+function afficherPreviewCerfa(results) {
+  // On garde uniquement les CERFA Titulaires pour pré-remplir le simulateur (les Suppléants sont informatifs)
+  const tit = results.filter(r => !r.erreur && r.type === 'titulaires');
+  const sup = results.filter(r => !r.erreur && r.type === 'suppleants');
+  const err = results.filter(r => r.erreur);
+
+  let html = `<div style="font-weight:700; color:var(--bleu); margin-bottom:8px; font-size:16px;">🔍 Aperçu de l'extraction</div>
+    <div style="font-size:12px; color:var(--gris); margin-bottom:10px;">Vérifiez les chiffres avant d'appliquer. Les Suppléants sont détectés mais seuls les Titulaires alimentent le simulateur.</div>`;
+
+  if (tit.length) {
+    html += `<table style="width:100%; font-size:13px;"><thead><tr>
+      <th>Collège</th><th>Inscrits</th><th>Votants</th><th>Partic.</th>
+      <th>FO</th><th>CFDT</th><th>CGT</th><th>CFE-CGC</th><th>Autres</th><th>Source</th>
+    </tr></thead><tbody>`;
+    tit.forEach(r => {
+      const part = r.participation != null ? `${r.participation.toString().replace('.', ',')} %` : '—';
+      html += `<tr>
+        <td><strong>${r.college}</strong></td>
+        <td>${r.inscrits ?? '?'}</td>
+        <td>${r.votants ?? '?'}</td>
+        <td>${part}</td>
+        <td><strong style="color:var(--bleu);">${r.voix.FO}</strong></td>
+        <td>${r.voix.CFDT}</td>
+        <td>${r.voix.CGT}</td>
+        <td>${r.college === 'Exécution' ? '—' : r.voix.CFECGC}</td>
+        <td>${r.voix.Autres}</td>
+        <td style="font-size:11px; color:var(--gris);">${r.fichier || ''}</td>
+      </tr>`;
+    });
+    html += `</tbody></table>`;
+  }
+  if (sup.length) {
+    html += `<details style="margin-top:8px;"><summary style="cursor:pointer; font-size:12px; color:var(--gris);">${sup.length} CERFA Suppléants détectés (info uniquement)</summary>
+      <ul style="font-size:12px; margin:6px 0;">${sup.map(r => `<li>${r.college} : FO=${r.voix.FO}, CFDT=${r.voix.CFDT}, CGT=${r.voix.CGT}, CFE-CGC=${r.voix.CFECGC}, Autres=${r.voix.Autres}</li>`).join('')}</ul>
+    </details>`;
+  }
+  if (err.length) {
+    html += `<div style="margin-top:8px; color:var(--rouge); font-size:12px;">${err.map(r => '⚠️ ' + r.erreur).join('<br>')}</div>`;
+  }
+  // Détection d'ententes pour afficher la clé
+  const avecEntente = tit.filter(r => r.ententes && Object.keys(r.ententes).length > 0);
+  if (avecEntente.length) {
+    html += `<div style="margin-top:8px; padding:8px 12px; background:#fff; border-left:3px solid var(--or); font-size:12px;">
+      <strong>Clés d'entente détectées :</strong> ${avecEntente.map(r => `${r.college} → ${Object.entries(r.ententes).map(([k,v])=>k+' '+Math.round(v*100)+'%').join(', ')}`).join(' | ')}
+    </div>`;
+  }
+  html += `<div style="margin-top:12px; display:flex; gap:10px;">
+    <button type="button" id="btn-apply-cerfa" class="btn" style="background:var(--bleu); color:#fff; padding:10px 18px; border:none; border-radius:6px; font-weight:600; cursor:pointer;">✅ Appliquer ces valeurs au simulateur</button>
+    <button type="button" id="btn-cancel-cerfa" class="btn" style="background:#fff; color:var(--gris); padding:10px 18px; border:1.5px solid var(--gris-clair); border-radius:6px; font-weight:600; cursor:pointer;">Annuler</button>
+  </div>`;
+
+  cerfaPreview.style.display = 'block';
+  cerfaPreview.innerHTML = html;
+  document.getElementById('btn-apply-cerfa').onclick = () => {
+    tit.forEach(r => {
+      const cur = getPartic2023(r.college);
+      if (r.participation != null) cur.particPct = r.participation;
+      // Si Exécution, on force CFE-CGC à 0 (règle catégorielle)
+      cur.voix.FO = r.voix.FO; cur.voix.CFDT = r.voix.CFDT; cur.voix.CGT = r.voix.CGT;
+      cur.voix.CFECGC = (r.college === 'Exécution') ? 0 : r.voix.CFECGC;
+      cur.voix.Autres = r.voix.Autres;
+      state.partic2023[r.college] = cur;
+    });
+    cerfaPreview.style.display = 'none';
+    cerfaPreview.innerHTML = '';
+    cerfaStatus.innerHTML = `<div style="color:var(--vert); font-weight:600;">✅ ${tit.length} collège${tit.length>1?'s':''} pré-rempli${tit.length>1?'s':''} dans le simulateur.</div>`;
+    if (state.selectedUM) renderSimulateur();
+    setTimeout(() => { cerfaStatus.innerHTML = ''; }, 6000);
+  };
+  document.getElementById('btn-cancel-cerfa').onclick = () => {
+    cerfaPreview.style.display = 'none';
+    cerfaPreview.innerHTML = '';
+  };
 }
 
 /* ═══════════════════════════════════════════════════
